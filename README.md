@@ -1,2 +1,0 @@
-# aVote
-Anonymous voting platform
