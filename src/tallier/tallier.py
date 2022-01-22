@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+from functools import lru_cache
 from itertools import count, repeat, combinations
 import socket
 from struct import pack, unpack
@@ -29,6 +30,11 @@ p = config.p
 votes_vector = [0] * config.M
 
 vandermond_first_row = impl.inverse([[(i ** j) % p for j in range(config.D)] for i in range(1, config.D + 1)], p)[0]
+
+@lru_cache
+def fan_in_or_coefficients(length):
+    f_l = [(1, 0)] + [(i + 2, 1) for i in range(length)]
+    return impl.lagrange_polynomial(f_l, p)
 
 block_size = int(2 * math.ceil(math.sqrt(math.ceil(math.log2(p)))) ** 2)
 
@@ -140,8 +146,7 @@ class MPC:
     async def fan_in_or(self, msgid: int, a_i: [int]) -> int:  # Unbounded Fan-In Or
         assert len(a_i) > 0
         A = 1 + sum(a_i)
-        f_l = [(1, 0)] + [(i + 2, 1) for i in range(len(a_i))]
-        alpha_i = impl.lagrange_polynomial(f_l, p)
+        alpha_i = fan_in_or_coefficients(len(a_i))
 
         res = alpha_i[0] + alpha_i[1] * A
         mul_A = A
@@ -406,8 +411,9 @@ def main(tallier_curr: int) -> [str]:
                 del names[winner]
             return maxs
     try:
-        asyncio.set_event_loop(asyncio.new_event_loop())
-        return asyncio.get_event_loop().run_until_complete(calc())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(calc())
     except ConnectionError:
         return []
 
