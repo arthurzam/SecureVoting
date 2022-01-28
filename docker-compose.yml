@@ -1,0 +1,45 @@
+version: '3.4'
+
+services:
+  # db:
+  #   image: postgres:latest
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: password
+  #   #   POSTGRES_DB: db
+  #   # volumes:
+  #   # - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+  avote1:
+    command: ["1"]
+    volumes:
+      - ./keys/avote1.pem:/etc/certfile.pem:ro
+      - ./keys/avote_ca.crt:/etc/avote_ca.crt:ro
+      - ./src/tallier/:/app/:ro
+    build:
+      context: .
+      dockerfile: src/tallier/Dockerfile
+    ports:
+      # - "18080:8080"
+      - "8080:8080"
+  avote2:
+    command: ["2"]
+    volumes:
+      - ./keys/avote2.pem:/etc/certfile.pem:ro
+      - ./keys/avote_ca.crt:/etc/avote_ca.crt:ro
+      - ./src/tallier/:/app/:ro
+    build:
+      context: .
+      dockerfile: src/tallier/Dockerfile
+  avote3:
+    command: ["3"]
+    volumes:
+      - ./keys/avote3.pem:/etc/certfile.pem:ro
+      - ./keys/avote_ca.crt:/etc/avote_ca.crt:ro
+      - ./src/tallier/:/app/:ro
+    build:
+      context: .
+      dockerfile: src/tallier/Dockerfile
+  webserver:
+    build: src/webserver
+    ports:
+      - 80:5000
