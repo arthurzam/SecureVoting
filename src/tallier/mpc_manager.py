@@ -17,13 +17,12 @@ from typing import Dict, Optional, List
 from dataclasses import dataclass
 from uuid import UUID
 from pathlib import Path
+import logging
 import asyncio
 import ssl
 
 from mpc import TallierConn, TallierConnFactory, MPC
 
-import logging
-logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -196,7 +195,8 @@ class TallierManager:
         pass
 
 async def main(number):
-    async with TallierManager(Path('/etc/certfile.pem'), Path('/etc/avote_ca.crt')) as manager:
+    secrets_dir = Path("/run/secrets")
+    async with TallierManager(secrets_dir / 'certfile.pem', secrets_dir / 'avote_ca.crt') as manager:
         wanted_talliers = [f'avote{i}' for i in range(1, 4)]
         def tallier_factory(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             return Tallier(reader, writer)

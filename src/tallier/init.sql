@@ -23,9 +23,3 @@ CREATE TABLE election_votes (
     email text REFERENCES users(email),
     PRIMARY KEY (election_id, email)
 );
-
-INSERT INTO users(email, secret_number) VALUES
-    ('arthurzam@gmail.com', 10),
-    ('arthurzam@gmail.com', 11),
-    ('arthurzam@gmail.com', 12),
-    ('arthurzam@gmail.com', 13);

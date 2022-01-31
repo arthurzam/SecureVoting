@@ -13,5 +13,5 @@ WORKDIR /app/
 
 # CMD ["python", "tallier.py", "1"]
 
-# ENTRYPOINT ["python", "websock.py"]
-ENTRYPOINT ["python", "mpc_manager.py"]
+ENTRYPOINT ["python", "main.py"]
+# ENTRYPOINT ["python", "mpc_manager.py"]
