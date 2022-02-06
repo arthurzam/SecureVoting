@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Register</title>
+    <script>
+      function register() {
+        const email = document.getElementById("tb_email").value;
+        const name = document.getElementById("tb_name").value;
+
+        const talliers = {{talliers | tojson}};
+        let OKs = 0;
+
+        const onmessage = (event) => alert(event.data);
+        const onclose = (event) => {
+          if (OKs < 0) {
+          } else if (event.code === 1000) {
+            OKs += 1;
+            if (OKs == talliers.length) {
+              alert('All OK');
+              location.href = 'login.html';
+            }
+          } else {
+            OKs = -1;
+            alert('Someone said no');
+          }
+        };
+        talliers.forEach(tallier => {
+          let exampleSocket = new WebSocket(`${tallier}/register`);
+          exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({ email: email, name: name }));
+          exampleSocket.onmessage = onmessage;
+          exampleSocket.onclose = onclose;
+        });
+      }
+    </script>
+  </head>
+  <body>
+    <form>
+      <label for="tb_email">Enter your email:</label><br />
+      <input type="email" id="tb_email" size="20" required /><br />
+      <label for="tb_name">Enter your name:</label><br />
+      <input type="text" id="tb_name" size="20" required /><br />
+      <input type="button" value="Register" onclick="register()">
+      <input type="reset">
+    </form>
+  </body>
+</html>
