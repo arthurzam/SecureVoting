@@ -7,7 +7,7 @@ from db import DBconn
 from mpc_manager import TallierManager
 
 
-async def websock_server(db: DBconn, manager: TallierManager) -> None:
+def websock_server(db: DBconn, manager: TallierManager):
     logger = logging.getLogger('websocket')
     logger.setLevel(logging.INFO)
 
@@ -19,11 +19,35 @@ async def websock_server(db: DBconn, manager: TallierManager) -> None:
             message = json.loads(await websocket.recv())
             if path == "/register":
                 res = await db.register(message['email'], message['name'], 42)
-                logger.info('register %s <%s>: db result is %s', message['name'], message['email'], res)
+                logger.info('register %s <%s>: db result is %s', message['email'], 'successful' if res else 'unsuccessful')
+                return await websocket.close(code=(1000 if res else 1008))
             elif path == "/login":
-                pass
+                res = await db.login(message['email'], int(message['number']))
+                logger.info('login <%s>: db result is %s', message['email'], 'successful' if res else 'unsuccessful')
+                return await websocket.close(code=(1000 if res else 1008))
+            elif path == "/elections":
+                if not await db.login(message['email'], int(message['number'])):
+                    return await websocket.close(code=1008)
+                managed, voting = await db.get_elections_ids(message['email'])
+                await websocket.send(json.dumps({
+                    'managed': managed,
+                    'voting': voting,
+                }))
+                return await websocket.close(code=1000)
+            elif path == "/elections/create":
+                if not await db.login(message['email'], int(message['number'])):
+                    return await websocket.close(code=1008)
+                return await websocket.close(code=1000)
+        except json.JSONDecodeError:
+            logger.info('Badly formatted JSON message for %s', path)
+            return await websocket.close(code=1003)
+        except KeyError as e:
+            logger.info('Missing keys in message for %s', path, exc_info=e)
+            return await websocket.close(code=1007)
+        except ws.exceptions.ConnectionClosedError:
+            logger.info('Connection closed')
         except Exception as e:
             logger.error('Error handling on %s', path, exc_info=e)
+            return await websocket.close(code=1003)
 
-    async with ws.serve(handler, "", 8080):
-        await asyncio.Future()
+    return ws.serve(handler, "", 8080)

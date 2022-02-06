@@ -19,4 +19,12 @@ class Election(NamedTuple):
     p: int
     L: int
 
-__all__ = ['ElectionType', 'Election']
+
+class TallierAddress(NamedTuple):
+    address: str
+    port: int
+
+    def __str__(self) -> str:
+        return f'{self.address}:{self.port}'
+
+__all__ = ['ElectionType', 'Election', 'TallierAddress']

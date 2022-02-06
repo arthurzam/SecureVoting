@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from struct import pack, unpack
-from typing import Dict, Optional, List
+from typing import Tuple, Dict, Optional, List, Union
 from dataclasses import dataclass
 from uuid import UUID
 from pathlib import Path
@@ -21,7 +21,8 @@ import logging
 import asyncio
 import ssl
 
-from mpc import TallierConn, TallierConnFactory, MPC
+from mpc import MpcBase, MpcValidation, TallierConn, TallierConnFactory
+from mytypes import Election, TallierAddress
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -32,7 +33,7 @@ TALLIER_PORT = 18080
 class Tallier(TallierConn):
     def __init__(self, reader: Optional[asyncio.StreamReader], writer: Optional[asyncio.StreamWriter]):
         self.reader, self.writer = reader, writer
-        self.queue = {}
+        self.queue: Dict[int, Union[List[int], asyncio.Future]] = {}
 
     async def close(self):
         try:
@@ -41,19 +42,19 @@ class Tallier(TallierConn):
         finally:
             pass
 
-    async def read(self, msgid: int) -> int:
+    async def read(self, msgid: int) -> Tuple[int, ...]:
         if msgid in self.queue:
             if len(a := self.queue[msgid]) > 1:
-                return a.pop(0)
+                return (a.pop(0), )
             else:
-                return self.queue.pop(msgid)[0]
+                return (self.queue.pop(msgid)[0], )
         else:
             fut = asyncio.get_event_loop().create_future()
             self.queue[msgid] = fut
-            return await fut
+            return (await fut, )
 
-    async def write(self, msgid: int, val: int):
-        self.writer.write(pack('>II', msgid, val))
+    async def write(self, msgid: int, values: Tuple[int, ...]):
+        self.writer.write(pack('>II', msgid, values[0]))
         await self.writer.drain()
 
     async def receive_loop(self):
@@ -75,8 +76,59 @@ class TallierSelf(Tallier):
     async def close(self):
         pass
 
-    async def write(self, msgid: int, val: int):
-        self.queue.setdefault(msgid, []).append(val)
+    async def write(self, msgid: int, values: Tuple[int, ...]):
+        self.queue.setdefault(msgid, []).append(values[0])
+
+
+class MultiTallier(TallierConn):
+    def __init__(self, size: int, reader: Optional[asyncio.StreamReader], writer: Optional[asyncio.StreamWriter]):
+        self.reader, self.writer = reader, writer
+        self.queue: Dict[int, Union[List[int], asyncio.Future]] = {}
+        self.size = size
+
+    async def close(self):
+        try:
+            self.writer.close()
+            await self.writer.wait_closed()
+        finally:
+            pass
+
+    async def read(self, msgid: int) -> Tuple[int, ...]:
+        if msgid in self.queue:
+            if len(a := self.queue[msgid]) > 1:
+                return a.pop(0)
+            else:
+                return self.queue.pop(msgid)[0]
+        else:
+            fut = asyncio.get_event_loop().create_future()
+            self.queue[msgid] = fut
+            return await fut
+
+    async def write(self, msgid: int, values: Tuple[int, ...]):
+        self.writer.write(pack('>I' + self.size * 'I', msgid, *values))
+        await self.writer.drain()
+
+    async def receive_loop(self):
+        try:
+            while True:
+                msgid, *share = unpack('>I' + self.size * 'I', await self.reader.readexactly(4 * self.size + 4))
+                if isinstance(a := self.queue.setdefault(msgid, []), list):
+                    a.append(tuple(share))
+                else:
+                    self.queue.pop(msgid).set_result(tuple(share))
+        except asyncio.CancelledError:
+            await self.close()
+
+
+class MultiTallierSelf(MultiTallier):
+    def __init__(self):
+        MultiTallier.__init__(self, None, None)
+
+    async def close(self):
+        pass
+
+    async def write(self, msgid: int, values: Tuple[int, ...]):
+        self.queue.setdefault(msgid, []).append(values)    
 
 
 def client_ssl_key(ca_certfile: Path) -> ssl.SSLContext:
@@ -94,11 +146,12 @@ def server_ssl_key(certfile: Path) -> ssl.SSLContext:
 class MpcWaitItem():
     self_id: int
     election_id: UUID
-    collected_all: asyncio.Event
 
     tallier_factory: TallierConnFactory
     talliers: List[Optional[TallierConn]]
     missing_talliers: int
+
+    collected_all = asyncio.Event()
 
     def add_tallier(self, id: int, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         self.talliers[id] = self.tallier_factory(reader, writer)
@@ -131,10 +184,10 @@ class TallierManager:
             await event.wait()
         return self.mpc_wait_list[election_id]
 
-    async def _connect(self, election_id: UUID, destination: str):
+    async def _connect(self, election_id: UUID, destination: TallierAddress):
         try:
             logger.info("[Connect %s] start", destination)
-            reader, writer = await asyncio.open_connection(host=destination, port=TALLIER_PORT, ssl=client_ssl_key(self.ca_certfile))
+            reader, writer = await asyncio.open_connection(host=destination.address, port=destination.port, ssl=client_ssl_key(self.ca_certfile))
             wait_item = self.mpc_wait_list[election_id]
 
             logger.info("[Connect %s] data send", destination)
@@ -177,9 +230,9 @@ class TallierManager:
             pass
             # logger.error('failed on connection reaction', exc_info=e)
 
-    async def start_election(self, election_id: UUID, wanted_talliers: List[str], self_id: int, tallier_factory: TallierConnFactory) -> None:
+    async def start_clique(self, election_id: UUID, wanted_talliers: List[TallierAddress], self_id: int, tallier_factory: TallierConnFactory) -> Tuple[TallierConn, ...]:
         base_talliers = [None for _ in wanted_talliers]
-        wait_item = MpcWaitItem(self_id, election_id, asyncio.Event(), tallier_factory, base_talliers, len(base_talliers) - 1)
+        wait_item = MpcWaitItem(self_id, election_id, tallier_factory, base_talliers, len(base_talliers) - 1)
         self.mpc_wait_list[election_id] = wait_item
         if wait_config := self.config_wait_list.pop(election_id, None):
             wait_config.set()
@@ -188,20 +241,16 @@ class TallierManager:
                 asyncio.ensure_future(self._connect(election_id, destination))
         await wait_item.collected_all.wait()
         logger.info('Got all %s', election_id)
-        del self.mpc_wait_list[election_id]
-        for ta in wait_item.talliers:
-            if ta:
-                await ta.close()
-        pass
+        return tuple(wait_item.talliers)
 
 async def main(number):
     secrets_dir = Path("/run/secrets")
     async with TallierManager(secrets_dir / 'certfile.pem', secrets_dir / 'avote_ca.crt') as manager:
-        wanted_talliers = [f'avote{i}' for i in range(1, 4)]
+        wanted_talliers = [TallierAddress(f'avote{i}', TALLIER_PORT) for i in range(1, 4)]
         def tallier_factory(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             return Tallier(reader, writer)
-        await manager.start_election(UUID('84137fa9-3cfd-414a-bef5-27b026f835c6'), wanted_talliers, number, tallier_factory)
-        await manager.start_election(UUID('74137fa9-3cfd-414a-bef5-27b026f835c9'), wanted_talliers, number, tallier_factory)
+        await manager.start_clique(UUID('84137fa9-3cfd-414a-bef5-27b026f835c6'), wanted_talliers, number, tallier_factory)
+        await manager.start_clique(UUID('74137fa9-3cfd-414a-bef5-27b026f835c9'), wanted_talliers, number, tallier_factory)
         
 if __name__ == '__main__':
     import sys

@@ -12,15 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from asyncio.log import logger
 from functools import lru_cache
 from itertools import combinations, count, repeat
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Awaitable, Dict, Iterable, List, Optional, Tuple
 from random import randint
 import operator
 import asyncio
 import math
 
-from mytypes import Election
+from mytypes import Election, ElectionType
 import utils
 
 
@@ -28,10 +29,10 @@ class TallierConn:
     async def close(self):
         raise NotImplementedError()
 
-    async def read(self, msgid: int) -> int:
+    async def read(self, msgid: int) -> Tuple[int, ...]:
         raise NotImplementedError()
 
-    async def write(self, msgid: int, val: int):
+    async def write(self, msgid: int, values: Tuple[int, ...]):
         raise NotImplementedError()
 
     async def receive_loop(self):
@@ -39,19 +40,17 @@ class TallierConn:
 
 TallierConnFactory = Callable[[asyncio.StreamReader, asyncio.StreamWriter], TallierConn]
 
-class MPC:
+class MpcBase:
     def __init__(self, election: Election, talliers: Tuple[TallierConn, ...]):
         self.election = election
         self.D = len(talliers)
         self.p = election.p
+        
+        self.collectors = tuple(asyncio.create_task(tallier.receive_loop()) for tallier in talliers.values())
+        self.talliers = talliers
 
         self.vandermond_first_row = utils.inverse([[pow(i, j, self.p) for j in range(self.D)] for i in range(1, self.D + 1)], self.p)[0]
         self.gen_shamir = lambda val: utils.clean_gen_shamir(val, self.D, (self.D + 1) // 2, self.p)
-        self.block_size = int(2 * math.ceil(math.sqrt(math.ceil(math.log2(self.p)))) ** 2)
-
-        self.collectors = [asyncio.create_task(tallier.receive_loop()) for tallier in talliers.values()]
-        self.talliers = talliers
-        self.borda_random = None
 
     async def __aenter__(self):
         return self
@@ -60,16 +59,22 @@ class MPC:
         for collector in self.collectors:
             collector.cancel()
         await asyncio.gather(*(v.close() for v in self.talliers))
-        if config.debug:
-            print('Closed all')
+        logger.info('Closed MPC communication for %s', self.election.election_id)
 
-    async def exchange(self, msgid: int, values: Tuple[int, ...]) -> List[int]:
+
+class MpcWinner(MpcBase):
+    def __init__(self, election: Election, talliers: Tuple[TallierConn, ...]):
+        super().__init__(election, talliers)
+
+        self.block_size = int(2 * math.ceil(math.sqrt(math.ceil(math.log2(self.p)))) ** 2)
+
+    async def exchange(self, msgid: int, values: Tuple[int, ...]) -> Tuple[int, ...]:
         async def single_exchange(tallier: Optional[TallierConn], value: int) -> int:
             if not tallier:
                 return value
-            await tallier.write(msgid, value)
-            return await tallier.read(msgid)
-        return list(await asyncio.gather(*map(single_exchange, self.talliers, values)))
+            await tallier.write(msgid, (value, ))
+            return await tallier.read(msgid)[0]
+        return tuple(await asyncio.gather(*map(single_exchange, self.talliers, values)))
 
     async def multiply(self, msgid: int, a: int, b: int) -> int:
         results = await self.exchange(msgid, self.gen_shamir((a * b) % self.p))
@@ -92,14 +97,15 @@ class MPC:
                 return ((r * root_inv + 1) * pow(2, -1, self.p)) % self.p
 
     @lru_cache
-    def _fan_in_or_coefficients(self, length):
+    @staticmethod
+    def __fan_in_or_coefficients(p: int, length: int):
         f_l = [(1, 0)] + [(i + 2, 1) for i in range(length)]
-        return utils.lagrange_polynomial(f_l, self.p)
+        return utils.lagrange_polynomial(f_l, p)
 
     async def fan_in_or(self, msgid: int, a_i: List[int]) -> int:  # Unbounded Fan-In Or
         assert len(a_i) > 0
         A = (1 + sum(a_i)) % self.p
-        alpha_i = self._fan_in_or_coefficients(len(a_i))
+        alpha_i = MpcWinner.__fan_in_or_coefficients(self.p, len(a_i))
 
         res = alpha_i[0] + alpha_i[1] * A
         mul_A = A
@@ -127,7 +133,7 @@ class MPC:
     async def xor(self, msgid: int, a_i: List[int], b_i: List[int]) -> List[int]:
         assert len(a_i) == len(b_i)
         c_i = await asyncio.gather(*map(self.multiply, count(msgid), a_i, b_i))
-        return [(a + b - 2 * c) for a, b, c in zip(a_i, b_i, c_i)]
+        return [(a + b - 2 * c) % self.p for a, b, c in zip(a_i, b_i, c_i)]
 
     async def less_bitwise(self, msgid: int, a_i: List[int], b_i: List[int]) -> int:  # Bitwise Less-Than
         assert len(a_i) == len(b_i) > 0
@@ -143,7 +149,7 @@ class MPC:
         while True:
             bits_count = math.ceil(math.log2(self.p))
             r_i = await asyncio.gather(*map(self.random_bit, range(msgid, msgid + bits_count)))
-            p_i = [int(digit) for digit in reversed(bin(p)[2:])]
+            p_i = [int(digit) for digit in reversed(bin(self.p)[2:])]
             check_bit = await self.resolve(msgid, await self.less_bitwise(msgid, r_i, p_i))
             if check_bit == 1:
                 return r_i
@@ -184,20 +190,49 @@ class MPC:
             votes_idx = await asyncio.gather(*(map(max_idx, count(msgbase, 3 * self.block_size), votes_idx[::2], votes_idx[1::2]))) + votes_idx[len(votes_idx)^1:]
         return await self.resolve(msgbase, votes_idx[0][0])
 
-    async def validate_approval(self, msgbase: int, votes: [int]):
-        a_i = await asyncio.gather(*(self.multiply(msgid, a, (1 - a) % self.p) for msgid, a in enumerate(votes, start=msgbase)))
-        a_i = await asyncio.gather(*map(self.resolve, count(msgbase), a_i))
+class MpcValidation(MpcBase):
+    def __init__(self, election: Election, talliers: Tuple[TallierConn, ...]):
+        super().__init__(election, talliers)
+
+        self.block_size = int(2 * math.ceil(math.sqrt(math.ceil(math.log2(self.p)))) ** 2)
+
+    async def exchange(self, msgid: int, values: Tuple[Tuple[int, ...], ...]) -> Tuple[Tuple[int, ...], ...]:
+        async def single_exchange(tallier: Optional[TallierConn], values: Tuple[int, ...]) -> Tuple[int, ...]:
+            if not tallier:
+                return values
+            await tallier.write(msgid, values)
+            return await tallier.read(msgid)
+        return tuple(await asyncio.gather(*map(single_exchange, self.talliers, values)))
+
+    async def multiply(self, msgid: int, a_i: Tuple[int, ...], b_i: Tuple[int, ...]) -> Tuple[int, ...]:
+        res_i = await self.exchange(msgid, tuple(self.gen_shamir((a * b) % self.p) for a, b in zip(a_i, b_i)))
+        return tuple(sum(map(operator.mul, self.vandermond_first_row, res)) % self.p for res in res_i)
+
+    async def resolve(self, msgid: int, a_i: Tuple[int, ...]) -> Tuple[int, ...]:
+        res_i = await self.exchange(msgid, tuple(tuple(a for _ in range(self.D)) for a in a_i))
+        return tuple(utils.resolve(res, self.p) for res in res_i)
+
+    async def random_number(self, msgid: int, amount: int) -> Tuple[int, ...]:  # Joint Random Number Sharing
+        r_i_i = tuple(self.gen_shamir(randint(0, self.p - 1)) for _ in range(amount))
+        return tuple(sum(res) % self.p for res in await self.exchange(msgid, r_i_i))
+
+    def __calc_complement(self, votes: Tuple[int, ...], complement: int) -> Tuple[int, ...]:
+        return tuple((complement - a) % self.p for a in votes)
+
+    async def validate_approval(self, msgid: int, votes: Tuple[int, ...]) -> bool:
+        a_i = await self.multiply(msgid, votes, self.__calc_complement(votes, 1))
+        a_i = await self.resolve(msgid, a_i)
         return all((a == 0 for a in a_i))
 
-    async def validate_plurality(self, msgbase: int, votes: [int]):
-        s, f = await asyncio.gather(self.resolve(msgbase, sum(votes) % self.p),
-                                    self.validate_approval(msgbase + 1, votes))
-        return s == 1 and f
+    async def validate_plurality(self, msgid: int, votes: Tuple[int, ...]) -> bool:
+        a_i = await self.multiply(msgid, votes, self.__calc_complement(votes, 1))
+        s, *a_i = await self.resolve(msgid, (sum(votes) % self.p, ) + a_i)
+        return s == 1 and all((a == 0 for a in a_i))
 
-    async def validate_veto(self, msgbase: int, votes: [int]):
-        s, f = await asyncio.gather(self.resolve(msgbase, sum(votes) % self.p),
-                                    self.validate_approval(msgbase + 1, votes))
-        return s == self.M - 1 and f
+    async def validate_veto(self, msgid: int, votes: Tuple[int, ...]) -> bool:
+        a_i = await self.multiply(msgid, votes, self.__calc_complement(votes, 1))
+        s, *a_i = await self.resolve(msgid, (sum(votes) % self.p, ) + a_i)
+        return s == self.M - 1 and all((a == 0 for a in a_i))
 
     async def validate_range(self, msgbase: int, votes: [int], max_value: int):
         async def check_range(msgid: int, vote: int):
@@ -220,31 +255,30 @@ class MPC:
         return all(await asyncio.gather(self.validate_range(msgbase, votes, self.M - 1),
                                         two_stage_permute(msgbase + self.M)))
 
-    async def validate(self, msgid: int, votes: [int]) -> bool:
-        if config.selected_vote_system == config.VoteSystem.PLURALITY:
-            return await self.validate_plurality(msgid, votes)
-        elif config.selected_vote_system == config.VoteSystem.RANGE:
-            return await self.validate_range(msgid, votes, config.L)
-        elif config.selected_vote_system == config.VoteSystem.APPROVAL:
-            return await self.validate_approval(msgid, votes)
-        elif config.selected_vote_system == config.VoteSystem.VETO:
-            return await self.validate_veto(msgid, votes)
-        elif config.selected_vote_system == config.VoteSystem.BORDA:
-            return await self.validate_borda(msgid, votes)
-        else:
-            return True
+    async def validate(self, msgid: int, votes: Tuple[int, ...]) -> Awaitable[bool]:
+        if self.election.selected_election_type == ElectionType.approval:
+            return self.validate_approval(msgid, votes)
+        if self.election.selected_election_type == ElectionType.plurality:
+            return self.validate_plurality(msgid, votes)
+        if self.election.selected_election_type == ElectionType.veto:
+            return self.validate_veto(msgid, votes)
+        if self.election.selected_election_type == ElectionType.range:
+            return self.validate_range(msgid, votes)
+        if self.election.selected_election_type == ElectionType.borda:
+            return self.validate_borda(msgid, votes)
+        raise NotImplementedError()
 
     @staticmethod
-    def validate_blocksize() -> int:
-        if config.selected_vote_system == config.VoteSystem.PLURALITY:
-            return config.M + 1
-        elif config.selected_vote_system == config.VoteSystem.RANGE:
-            return config.M
-        elif config.selected_vote_system == config.VoteSystem.APPROVAL:
-            return config.M
-        elif config.selected_vote_system == config.VoteSystem.VETO:
-            return config.M + 1
-        elif config.selected_vote_system == config.VoteSystem.BORDA:
-            return (config.M * (config.M + 1)) // 2
-        else:
-            return 0
+    def message_size(election: Election) -> int:
+        M = len(election.candidates)
+        if election.selected_election_type == ElectionType.approval:
+            return M
+        if election.selected_election_type == ElectionType.plurality:
+            return M + 1
+        if election.selected_election_type == ElectionType.veto:
+            return M + 1
+        if election.selected_election_type == ElectionType.range:
+            raise NotImplementedError()
+        if election.selected_election_type == ElectionType.borda:
+            raise NotImplementedError()
+        raise NotImplementedError()
