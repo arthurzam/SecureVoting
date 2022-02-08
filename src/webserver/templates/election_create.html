@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Create Election</title>
+    <script>
+      if (!["email", "number"].every((name) => document.cookie.split(';').some((item) => item.trim().startsWith(`${name}=`)))) {
+        alert('You need to login');
+        location.href = '../login';
+      }
+
+      function cookies_login() {
+        return {
+          email: document.cookie.split('; ').find(row => row.startsWith('email=')).split('=')[1],
+          number: parseInt(document.cookie.split('; ').find(row => row.startsWith('number=')).split('=')[1]),
+        }
+      }
+
+      function loadCsv() {
+        const reader = new FileReader();
+        const voters = document.getElementById("voters");
+        reader.onload = event => {
+          event.target.result.split("\n").forEach(email => {
+            if (email.length > 0) {
+              const option = document.createElement("option");
+              option.text = email;
+              option.value = email;
+              voters.appendChild(option);
+            }
+          })
+        };
+        [...document.getElementById("voters_csv").files].forEach((input) => {
+          reader.readAsText(input);
+        });
+        console.log([...voters.options].map(o => o.text));
+      }
+
+      function create() {
+        const email = document.getElementById("tb_email").value;
+        const name = document.getElementById("tb_name").value;
+
+        const talliers = {{talliers | tojson}};
+        let OKs = 0;
+
+        const onmessage = (event) => alert(event.data);
+        const onclose = (event) => {
+          if (OKs < 0) {
+          } else if (event.code === 1000) {
+            OKs += 1;
+            if (OKs == talliers.length) {
+              alert('All OK');
+              location.href = 'login';
+            }
+          } else {
+            OKs = -1;
+            alert('Someone said no');
+          }
+        };
+        talliers.forEach(tallier => {
+          let exampleSocket = new WebSocket(`${tallier}/register`);
+          exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({ email: email, name: name }));
+          exampleSocket.onmessage = onmessage;
+          exampleSocket.onclose = onclose;
+        });
+      }
+    </script>
+  </head>
+  <body>
+    <form>
+      <h3>Election Configuration</h3>
+      <label for="name">Name:</label><br />
+      <input type="text" id="name" style="width: 180px;" required /><br />
+      <label for="candidates">Candidates:</label><br />
+      <textarea id="candidates" style="width: 180px; height: 6em;" required ></textarea><br/>
+      <label for="winners">Winners Amount:</label>
+      <input type="number" id="winners" value="1" min="1" style="width: 50px;" required /><br />
+
+      <h3>Voters</h3>
+      <select id="voters" size="5" style="width: 180px;" ></select><br />
+      <input type="file" id="voters_csv" accept=".csv" />
+      <input type="button" value="Load" onclick="loadCsv()"><br />
+
+      <input type="button" value="Register" onclick="create()">
+      <input type="reset">
+    </form>
+  </body>
+</html>
