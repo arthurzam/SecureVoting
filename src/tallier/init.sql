@@ -11,6 +11,7 @@ CREATE TYPE election_type AS ENUM ('plurality', 'range', 'approval', 'veto', 'bo
 CREATE TABLE elections (
     election_id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
     manager_email text REFERENCES users(email),
+    name text,
     selected_election_type election_type NOT NULL,
     candidates text[] NOT NULL,
     winner_count smallint NOT NULL,

@@ -7,7 +7,7 @@ from db import DBconn
 from mpc_manager import TallierManager
 
 
-def websock_server(db: DBconn, manager: TallierManager):
+def websock_server(db: DBconn, manager: TallierManager, tallier_id: int):
     logger = logging.getLogger('websocket')
     logger.setLevel(logging.INFO)
 
@@ -19,7 +19,10 @@ def websock_server(db: DBconn, manager: TallierManager):
             message = json.loads(await websocket.recv())
             if path == "/register":
                 res = await db.register(message['email'], message['name'], 42)
-                logger.info('register %s <%s>: db result is %s', message['email'], 'successful' if res else 'unsuccessful')
+                logger.info('register %s <%s>: db result is %s', message['name'], message['email'], 'successful' if res else 'unsuccessful')
+                if res and tallier_id == 0:
+                    from mail import register_email
+                    register_email(message['email'], message['name'], 42)
                 return await websocket.close(code=(1000 if res else 1008))
             elif path == "/login":
                 res = await db.login(message['email'], int(message['number']))

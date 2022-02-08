@@ -16,7 +16,7 @@ async def main(tallier_id: int):
     secrets_dir = Path("/run/secrets")
     async with DBconn(user=f'avote{tallier_id}', database=f'avote{tallier_id}') as db:
         async with TallierManager(secrets_dir / 'certfile.pem', secrets_dir / 'avote_ca.crt') as manager:
-            async with websock_server(db, manager):
+            async with websock_server(db, manager, tallier_id):
                 await cancel
                 logger.info("Hello")
 
