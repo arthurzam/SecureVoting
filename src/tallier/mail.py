@@ -7,6 +7,7 @@ def send_email(to: str, title: str, content: str) -> EmailMessage:
     msg['From'] = 'avote@vmware.com'
     msg['To'] = to
     msg.set_content(content)
+    return msg
 
 def register_email(to: str, name: str, secret_number: int):
     content = f"""

@@ -35,7 +35,8 @@ services:
   avote2:
     command: ["2"]
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     build:
       context: ./src/tallier
       dockerfile: Dockerfile
@@ -45,11 +46,15 @@ services:
       - avote_ca.crt
       - source: avote2_key.pem
         target: certfile.pem
+    ports:
+      # - "18080:8080"
+      - "8081:8080"
 
   avote3:
     command: ["3"]
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     build:
       context: ./src/tallier
       dockerfile: Dockerfile
@@ -59,11 +64,20 @@ services:
       - avote_ca.crt
       - source: avote3_key.pem
         target: certfile.pem
+    ports:
+      # - "18080:8080"
+      - "8082:8080"
 
   webserver:
+    image: avote_webserver
     build: src/webserver
     ports:
       - 80:5000
+  
+  mailserver:
+    image: namshi/smtp
+    restart: always
+
 
 secrets:
   avote_ca.crt:
