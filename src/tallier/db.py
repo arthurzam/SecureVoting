@@ -80,6 +80,25 @@ class DBconn:
                 raise ValueError()
             return mytypes.Election(election_id, values['manager_email'], values['selected_election_type'],
                                     values['candidates'], values['p'], values['L'])
+    
+    async def vote_status(self, election_id: uuid.UUID, email: str) -> int:
+        async with self.conn.transaction():
+            status = await self.conn.fetchval("""
+                SELECT vote_state
+                FROM running_election JOIN election_votes USING (election_id)
+                WHERE election_id = $1 AND email = $2
+            """, election_id, email)
+            if status is None:
+                raise ValueError()
+            return status
+
+    async def vote(self, election_id: uuid.UUID, ballot: tuple[int]):
+        async with self.conn.transaction():
+            await self.conn.execute("""
+                UPDATE running_election
+                SET vote_vector = sum_int_arrays($2::int[], vote_vector)
+                WHERE election_id = $1
+            """, election_id, ballot)
 
     async def __create_tables(self) -> None:
         try:
