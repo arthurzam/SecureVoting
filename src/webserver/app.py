@@ -26,10 +26,12 @@ def register():
 
 @app.route('/login')
 def login():
-    resp = flask.render_template('login.html')
-    return resp
+    return flask.render_template('login.html')
 
 @app.route('/election/create')
 def election_create():
-    resp = flask.render_template('election_create.html')
-    return resp
+    return flask.render_template('election_create.html')
+
+@app.route('/elections')
+def elections():
+    return flask.render_template('elections.html')

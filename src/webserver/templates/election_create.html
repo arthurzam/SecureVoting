@@ -32,13 +32,15 @@
         [...document.getElementById("voters_csv").files].forEach((input) => {
           reader.readAsText(input);
         });
-        console.log([...voters.options].map(o => o.text));
+      }
+
+      function uuidv4() {
+        return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+          (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+        );
       }
 
       function create() {
-        const email = document.getElementById("tb_email").value;
-        const name = document.getElementById("tb_name").value;
-
         const talliers = {{talliers | tojson}};
         let OKs = 0;
 
@@ -49,7 +51,6 @@
             OKs += 1;
             if (OKs == talliers.length) {
               alert('All OK');
-              location.href = 'login';
             }
           } else {
             OKs = -1;
@@ -57,8 +58,18 @@
           }
         };
         talliers.forEach(tallier => {
-          let exampleSocket = new WebSocket(`${tallier}/register`);
-          exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({ email: email, name: name }));
+          let exampleSocket = new WebSocket(`${tallier}/elections/create`);
+          exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({
+            ...cookies_login(),
+            name: document.getElementById("name").value,
+            id: uuidv4(),
+            candidates: document.getElementById("candidates").value.split('\n').map(s => s.trim()),
+            K: 1,
+            p: 2147483647,
+            L: 1,
+            rule: parseInt(document.getElementById("form").elements["rule"].value),
+            voters: [...document.getElementById("voters").options].map(o => o.text)
+          }));
           exampleSocket.onmessage = onmessage;
           exampleSocket.onclose = onclose;
         });
@@ -66,15 +77,45 @@
     </script>
   </head>
   <body>
-    <form>
+    <form id="form">
       <h3>Election Configuration</h3>
       <label for="name">Name:</label><br />
       <input type="text" id="name" style="width: 180px;" required /><br />
       <label for="candidates">Candidates:</label><br />
       <textarea id="candidates" style="width: 180px; height: 6em;" required ></textarea><br/>
-      <label for="winners">Winners Amount:</label>
-      <input type="number" id="winners" value="1" min="1" style="width: 50px;" required /><br />
-
+      <!--<label for="winners">Winners Amount:</label>
+      <input type="number" id="winners" value="1" min="1" style="width: 50px;" required /><br />-->
+      <table style="border: 0;">
+        <tbody>
+          <tr>
+            <td>
+              <input type="radio" id="rule_plurality" value="1" name="rule" checked="checked" />
+              <label for="rule_plurality">plurality</label>
+            </td>
+            <td>
+              <input type="radio" id="rule_approval" value="3" name="rule"  />
+              <label for="rule_approval">approval</label>
+            </td>
+          </tr>
+        </tr>
+        <tr>
+          <td>
+            <input type="radio" id="rule_veto" value="4" name="rule"  />
+            <label for="rule_veto">veto</label>
+          </td>
+          <!-- <td>
+            <input type="radio" id="rule_borda" value="5" name="rule"  />
+            <label for="rule_borda">borda</label>
+          </td> -->
+        </tr>
+        <tr>
+          <!-- <td colspan="2">
+            <input type="radio" id="rule_range" value="2" name="rule"  />
+            <label for="rule_range">range</label>
+          </td> -->
+        </tr>
+        </tbody>
+      </table>
       <h3>Voters</h3>
       <select id="voters" size="5" style="width: 180px;" ></select><br />
       <input type="file" id="voters_csv" accept=".csv" />

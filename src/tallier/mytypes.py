@@ -13,6 +13,7 @@ class ElectionType(Enum):
 
 class Election(NamedTuple):
     election_id: UUID
+    manager_email: str
     selected_election_type: ElectionType
     candidates: List[str]
     winner_count: int

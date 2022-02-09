@@ -1,10 +1,16 @@
 import websockets as ws
+import contextlib
 import logging
 import asyncio
 import json
 
 from db import DBconn
 from mpc_manager import TallierManager
+from mpc import MpcValidation, MpcWinner
+from mytypes import Election, ElectionType
+
+
+
 
 
 def websock_server(db: DBconn, manager: TallierManager, tallier_id: int):
@@ -38,6 +44,18 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int):
                 }))
                 return await websocket.close(code=1000)
             elif path == "/elections/create":
+                print(message)
+                if not await db.login(message['email'], int(message['number'])):
+                    return await websocket.close(code=1008)
+                election = Election(message['id'], message['email'], ElectionType(message['rule']), message['candidates'],
+                                    message['K'], message['p'], message['L'])
+                res = await db.create_election(message['name'], election, tuple(message['voters']))
+                return await websocket.close(code=(1000 if res else 1008))
+            elif path == "/elections/start":
+                if not await db.login(message['email'], int(message['number'])):
+                    return await websocket.close(code=1008)
+                return await websocket.close(code=1000)
+            elif path == "/elections/stop":
                 if not await db.login(message['email'], int(message['number'])):
                     return await websocket.close(code=1008)
                 return await websocket.close(code=1000)

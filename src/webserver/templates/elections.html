@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>All Elections</title>
+    <script>
+      if (!["email", "number"].every((name) => document.cookie.split(';').some((item) => item.trim().startsWith(`${name}=`)))) {
+        alert('You need to login');
+        location.href = '../login';
+      }
+
+      function cookies_login() {
+        return {
+          email: document.cookie.split('; ').find(row => row.startsWith('email=')).split('=')[1],
+          number: parseInt(document.cookie.split('; ').find(row => row.startsWith('number=')).split('=')[1]),
+        }
+      }
+
+      function build_table() {
+        const tallier = {{talliers | tojson}}[0];
+        let exampleSocket = new WebSocket(`${tallier}/elections`);
+        exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify(cookies_login()));
+        exampleSocket.onmessage = (event) => {
+          const obj = JSON.parse(event.data);
+
+          const build_label = (text) => {
+            const cell = document.createElement('td');
+            cell.appendChild(document.createTextNode(text));
+            return cell;
+          };
+          const build_button = (label, func) => {
+            const cell = document.createElement('td');
+            const btn = document.createElement('input');
+            btn.type = 'button';
+            btn.onclick = func;
+            btn.value = label;
+            cell.appendChild(btn);
+            return cell;
+          };
+
+          const managed = document.getElementById('managed');
+          obj.managed.forEach(election => {
+            const row = document.createElement('tr');
+            const [name, id] = election.split(',');
+            row.appendChild(build_label(name));
+            row.appendChild(build_label(id));
+            row.appendChild(build_button('Start', (event) => {
+              console.log(`Start ${id}`);
+            }));
+            row.appendChild(build_button('Stop', (event) => {
+              console.log(`Stop ${id}`);
+            }));
+            managed.appendChild(row);
+          });
+
+          const voting = document.getElementById('voting');
+          obj.voting.forEach(election => {
+            const row = document.createElement('tr');
+            const [name, id] = election.split(',');
+            row.appendChild(build_label(name));
+            row.appendChild(build_label(id));
+            row.appendChild(build_button('Vote', (event) => {
+              location.href = `election/vote?id=${id}`;
+            }));
+            voting.appendChild(row);
+          });
+        };
+        exampleSocket.onclose = onclose;
+      }
+
+      function send_all(path, content) {
+        let OKs = 0;
+        const onmessage = (event) => alert(event.data);
+        const onclose = (event) => {
+          if (OKs < 0) {
+          } else if (event.code === 1000) {
+            OKs += 1;
+            if (OKs == talliers.length) {
+              alert('All OK');
+            }
+          } else {
+            OKs = -1;
+            alert('Someone said no');
+          }
+        };
+        {{talliers | tojson}}.forEach(tallier => {
+          let exampleSocket = new WebSocket(`${tallier}/${path}`);
+          exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({
+            ...cookies_login(),
+            ...content
+          }));
+          exampleSocket.onmessage = onmessage;
+          exampleSocket.onclose = onclose;
+        });
+      }
+    </script>
+  </head>
+  <body>
+    <form id="form">
+      <h3>Managed by me</h3>
+      <table border="1">
+        <tbody id="managed">
+          <tr>
+            <th>Name</th>
+            <th>UUID</th>
+          </tr>
+        </tbody>
+      </table>
+      <h3>Can Vote</h3>
+      <table border="1">
+        <tbody id="voting">
+          <tr>
+            <th>Name</th>
+            <th>UUID</th>
+          </tr>
+        </tbody>
+      </table>
+
+      <script>
+        build_table();
+      </script>
+    </form>
+  </body>
+</html>
