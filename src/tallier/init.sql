@@ -14,13 +14,13 @@ CREATE TABLE elections (
     candidates text[] NOT NULL,
     winner_count smallint NOT NULL,
     p bigint NOT NULL,
-    L smallint
+    l smallint
 );
 
 CREATE TABLE election_votes (
     election_id uuid REFERENCES elections(election_id),
     email text NOT NULL,
-    vote_state int NOT NULL DEFAULT 1,
+    vote_state int NOT NULL DEFAULT 0,
     PRIMARY KEY (election_id, email)
 );
 
@@ -37,5 +37,8 @@ $$;
 
 INSERT INTO users
     VALUES('a@a.com', 'Test', 42),
-    ('b@a.com', 'Test', 42)
+    ('b@a.com', 'Test', 42),
+    ('c@a.com', 'Test', 42),
+    ('d@a.com', 'Test', 42),
+    ('e@a.com', 'Test', 42)
 ;

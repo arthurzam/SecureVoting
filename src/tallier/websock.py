@@ -1,3 +1,5 @@
+from typing import Dict
+from uuid import UUID
 import websockets as ws
 import contextlib
 import logging
@@ -5,20 +7,20 @@ import asyncio
 import json
 
 from db import DBconn
-from mpc_manager import TallierManager
+from mpc_manager import TallierManager, TallierAddress, TALLIER_PORT
 from mpc import MpcValidation, MpcWinner
 from mytypes import Election, ElectionType
 
 
+running_elections: Dict[UUID, MpcValidation] = {}
 
+wanted_talliers = [TallierAddress(f'avote{i}', TALLIER_PORT) for i in range(1, 4)]
 
 
 def websock_server(db: DBconn, manager: TallierManager, tallier_id: int):
+    logging.getLogger('websockets.server').setLevel(logging.WARN)
     logger = logging.getLogger('websocket')
     logger.setLevel(logging.INFO)
-
-
-    logging.getLogger('websockets.server').setLevel(logging.WARN)
 
     async def handler(websocket, path: str):
         try:
@@ -54,6 +56,9 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int):
             elif path == "/elections/start":
                 if not await db.login(message['email'], int(message['number'])):
                     return await websocket.close(code=1008)
+                election = await db.get_election(message['id'])
+                running_elections[election.election_id] = await manager.start_election_voting(election, wanted_talliers, tallier_id)
+                # TODO: notify all voters & manager
                 return await websocket.close(code=1000)
             elif path == "/elections/stop":
                 if not await db.login(message['email'], int(message['number'])):

@@ -46,9 +46,11 @@
             row.appendChild(build_label(id));
             row.appendChild(build_button('Start', (event) => {
               console.log(`Start ${id}`);
+              send_all('elections/start', { id: id });
             }));
             row.appendChild(build_button('Stop', (event) => {
               console.log(`Stop ${id}`);
+              send_all('elections/stop', { id: id });
             }));
             managed.appendChild(row);
           });
@@ -97,6 +99,7 @@
   </head>
   <body>
     <form id="form">
+      <a href="election/create">Create Election</a>
       <h3>Managed by me</h3>
       <table border="1">
         <tbody id="managed">

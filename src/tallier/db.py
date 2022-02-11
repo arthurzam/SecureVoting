@@ -56,7 +56,7 @@ class DBconn:
         try:
             async with self.conn.transaction():
                 await self.conn.execute("""
-                    INSERT INTO elections(election_id, manager_email, name, selected_election_type, candidates, winner_count, p, L)
+                    INSERT INTO elections(election_id, manager_email, name, selected_election_type, candidates, winner_count, p, l)
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 """, election.election_id, election.manager_email, election_name, election.selected_election_type.name, election.candidates, election.winner_count,
                     election.p, election.L)
@@ -72,14 +72,14 @@ class DBconn:
     async def get_election(self, election_id: uuid.UUID) -> mytypes.Election:
         async with self.conn.transaction():
             values = await self.conn.fetchrow("""
-                SELECT manager_email, selected_election_type, candidates, winner_count, p, L
+                SELECT manager_email, selected_election_type, candidates, winner_count, p, l
                 FROM elections
                 WHERE election_id = $1
             """, election_id)
             if values is None:
                 raise ValueError()
-            return mytypes.Election(election_id, values['manager_email'], values['selected_election_type'],
-                                    values['candidates'], values['p'], values['L'])
+            return mytypes.Election(election_id, values['manager_email'], mytypes.ElectionType[values['selected_election_type']],
+                                    values['candidates'], values['winner_count'], values['p'], values['l'])
     
     async def vote_status(self, election_id: uuid.UUID, email: str) -> int:
         async with self.conn.transaction():

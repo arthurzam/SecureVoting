@@ -57,12 +57,13 @@
             alert('Someone said no');
           }
         };
+        const election_id = uuidv4();
         talliers.forEach(tallier => {
           let exampleSocket = new WebSocket(`${tallier}/elections/create`);
           exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({
             ...cookies_login(),
             name: document.getElementById("name").value,
-            id: uuidv4(),
+            id: election_id,
             candidates: document.getElementById("candidates").value.split('\n').map(s => s.trim()),
             K: 1,
             p: 2147483647,

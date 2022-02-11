@@ -193,6 +193,7 @@ class TallierManager:
             logger.info("[Connect %s] data send", destination)
             writer.write(wait_item.self_id.to_bytes(1, 'big') + wait_item.election_id.bytes)
             await writer.drain()
+            logger.info("[Connect %s] data sent", destination)
 
             logger.info("[Connect %s] data recv", destination)
             block = await reader.readexactly(17)
@@ -231,6 +232,7 @@ class TallierManager:
             # logger.error('failed on connection reaction', exc_info=e)
 
     async def start_clique(self, election_id: UUID, wanted_talliers: List[TallierAddress], self_id: int, tallier_factory: TallierConnFactory) -> Tuple[TallierConn, ...]:
+        logger.info('Loading clique %s', election_id)
         base_talliers = [None for _ in wanted_talliers]
         wait_item = MpcWaitItem(self_id, election_id, tallier_factory, base_talliers, len(base_talliers) - 1)
         self.mpc_wait_list[election_id] = wait_item
@@ -242,17 +244,25 @@ class TallierManager:
         await wait_item.collected_all.wait()
         logger.info('Got all %s', election_id)
         return tuple(wait_item.talliers)
-
-async def main(number):
-    secrets_dir = Path("/run/secrets")
-    async with TallierManager(secrets_dir / 'certfile.pem', secrets_dir / 'avote_ca.crt') as manager:
-        wanted_talliers = [TallierAddress(f'avote{i}', TALLIER_PORT) for i in range(1, 4)]
-        def tallier_factory(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-            return Tallier(reader, writer)
-        await manager.start_clique(UUID('84137fa9-3cfd-414a-bef5-27b026f835c6'), wanted_talliers, number, tallier_factory)
-        await manager.start_clique(UUID('74137fa9-3cfd-414a-bef5-27b026f835c9'), wanted_talliers, number, tallier_factory)
+    
+    async def start_election_voting(self, election: Election, wanted_talliers: List[TallierAddress], self_id: int) -> MpcValidation:
+        m = MpcValidation.message_size(election)
+        def tallier_factory(reader, writer):
+            return MultiTallier(m, reader, writer)
+        talliers = await self.start_clique(election.election_id, wanted_talliers, self_id, tallier_factory)
+        talliers[self_id] = MultiTallierSelf()
+        return MpcValidation(election, talliers)
+    
         
 if __name__ == '__main__':
+    async def main(number):
+        secrets_dir = Path("/run/secrets")
+        async with TallierManager(secrets_dir / 'certfile.pem', secrets_dir / 'avote_ca.crt') as manager:
+            wanted_talliers = [TallierAddress(f'avote{i}', TALLIER_PORT) for i in range(1, 4)]
+            def tallier_factory(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+                return Tallier(reader, writer)
+            await manager.start_clique(UUID('84137fa9-3cfd-414a-bef5-27b026f835c6'), wanted_talliers, number, tallier_factory)
+            await manager.start_clique(UUID('74137fa9-3cfd-414a-bef5-27b026f835c9'), wanted_talliers, number, tallier_factory)
     import sys
     if len(sys.argv) >= 2:
         asyncio.set_event_loop(loop := asyncio.new_event_loop())

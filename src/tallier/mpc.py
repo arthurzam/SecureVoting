@@ -52,10 +52,7 @@ class MpcBase:
         self.vandermond_first_row = utils.inverse([[pow(i, j, self.p) for j in range(self.D)] for i in range(1, self.D + 1)], self.p)[0]
         self.gen_shamir = lambda val: utils.clean_gen_shamir(val, self.D, (self.D + 1) // 2, self.p)
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args, **kargs):
+    async def close(self):
         for collector in self.collectors:
             collector.cancel()
         await asyncio.gather(*(v.close() for v in self.talliers))
