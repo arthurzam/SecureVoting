@@ -1,22 +1,25 @@
 import asyncio
 from asyncio.log import logger
+import os
 import signal
 import sys
 
 from pathlib import Path
 
-from mpc_manager import TallierManager
+from mpc_manager import TallierManager, TallierAddress
 from websock import websock_server
 from db import DBconn
 
 import logging
 logging.basicConfig(format='{asctime} | {name:^11} | [{levelname}] {message}', style='{', level=logging.INFO)
 
+wanted_talliers = [TallierAddress(ip, int(port)) for ip, port in (s.split(':') for s in os.getenv('TALLIERS_INTERNAL').split('|'))]
+
 async def main(tallier_id: int):
     secrets_dir = Path("/run/secrets")
     async with DBconn(user=f'avote{tallier_id}', database=f'avote{tallier_id}') as db:
         async with TallierManager(secrets_dir / 'certfile.pem', secrets_dir / 'avote_ca.crt') as manager:
-            async with websock_server(db, manager, tallier_id):                
+            async with websock_server(db, manager, tallier_id, wanted_talliers):                
                 await cancel
 
 

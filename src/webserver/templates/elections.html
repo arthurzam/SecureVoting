@@ -20,6 +20,11 @@
         const tallier = {{talliers | tojson}}[0];
         let exampleSocket = new WebSocket(`${tallier}/elections`);
         exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify(cookies_login()));
+        exampleSocket.onclose = (event) => {
+          if (event.code !== 1000) {
+            alert("something failed");
+          }
+        };
         exampleSocket.onmessage = (event) => {
           const obj = JSON.parse(event.data);
 
@@ -49,7 +54,6 @@
               send_all('elections/start', { id: id });
             }));
             row.appendChild(build_button('Stop', (event) => {
-              console.log(`Stop ${id}`);
               send_all('elections/stop', { id: id });
             }));
             managed.appendChild(row);
@@ -67,10 +71,10 @@
             voting.appendChild(row);
           });
         };
-        exampleSocket.onclose = onclose;
       }
 
       function send_all(path, content) {
+        const talliers = {{talliers | tojson}};
         let OKs = 0;
         const onmessage = (event) => alert(event.data);
         const onclose = (event) => {
@@ -85,7 +89,7 @@
             alert('Someone said no');
           }
         };
-        {{talliers | tojson}}.forEach(tallier => {
+        talliers.forEach(tallier => {
           let exampleSocket = new WebSocket(`${tallier}/${path}`);
           exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({
             ...cookies_login(),

@@ -12,18 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from asyncio.log import logger
 from functools import lru_cache
 from itertools import combinations, count, repeat
-from typing import Callable, Awaitable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Awaitable, Dict, Iterable, List, Optional, Tuple, Sequence
 from random import randint
 import operator
+import logging
 import asyncio
 import math
 
 from mytypes import Election, ElectionType
 import utils
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 class TallierConn:
     async def close(self):
@@ -41,12 +43,12 @@ class TallierConn:
 TallierConnFactory = Callable[[asyncio.StreamReader, asyncio.StreamWriter], TallierConn]
 
 class MpcBase:
-    def __init__(self, election: Election, talliers: Tuple[TallierConn, ...]):
+    def __init__(self, election: Election, talliers: Sequence[TallierConn]):
         self.election = election
         self.D = len(talliers)
         self.p = election.p
         
-        self.collectors = tuple(asyncio.create_task(tallier.receive_loop()) for tallier in talliers.values())
+        self.collectors = tuple(asyncio.create_task(tallier.receive_loop()) for tallier in talliers if tallier is not None)
         self.talliers = talliers
 
         self.vandermond_first_row = utils.inverse([[pow(i, j, self.p) for j in range(self.D)] for i in range(1, self.D + 1)], self.p)[0]
@@ -55,12 +57,12 @@ class MpcBase:
     async def close(self):
         for collector in self.collectors:
             collector.cancel()
-        await asyncio.gather(*(v.close() for v in self.talliers))
-        logger.info('Closed MPC communication for %s', self.election.election_id)
+        await asyncio.gather(*(v.close() for v in self.talliers if v is not None))
+        logger.info('Closed MPC for %s', self.election.election_id)
 
 
 class MpcWinner(MpcBase):
-    def __init__(self, election: Election, talliers: Tuple[TallierConn, ...]):
+    def __init__(self, election: Election, talliers: Sequence[TallierConn]):
         super().__init__(election, talliers)
 
         self.block_size = int(2 * math.ceil(math.sqrt(math.ceil(math.log2(self.p)))) ** 2)
@@ -171,35 +173,34 @@ class MpcWinner(MpcBase):
         c = await self.multiply(msgid, x, y)
         d = (x + y - c) % self.p
         return (await self.multiply(msgid, w, (d - c) % self.p) + 1 - d) % self.p
+    
+    async def __max_index(self, msgid: int, a: Tuple[Tuple[int, int], ...], b: Tuple[Tuple[int, int], ...]) -> Tuple[Tuple[int, int], ...]:
+        c = await self.less(msgid, a[1], b[1])
+        a = await asyncio.gather(self.multiply(msgid, c, b[1]),
+                                    self.multiply(msgid + 1, c, b[0]),
+                                    self.multiply(msgid + 2, (1 - c) % self.p, a[1]),
+                                    self.multiply(msgid + 3, (1 - c) % self.p, a[0]))
+        return (a[1] + a[3]) % self.p, (a[0] + a[2]) % self.p
 
-    async def max(self, msgbase: int, votes: List[int]) -> int:
-        async def max_idx(msgid: int, a: Tuple[int, int], b: Tuple[int, int]) -> Tuple[int, int]:
-            c = await self.less(msgid, a[1], b[1])
-            a = await asyncio.gather(self.multiply(msgid, c, b[1]),
-                                     self.multiply(msgid + 1, c, b[0]),
-                                     self.multiply(msgid + 2, (1 - c) % self.p, a[1]),
-                                     self.multiply(msgid + 3, (1 - c) % self.p, a[0]))
-            return (a[1] + a[3]) % self.p, (a[0] + a[2]) % self.p
+    async def max(self, msgbase: int, votes: Sequence[int]) -> int:
         if len(votes) == 1:
             return 0
         votes_idx = list(enumerate(votes))
         while len(votes_idx) > 1:
-            votes_idx = await asyncio.gather(*(map(max_idx, count(msgbase, 3 * self.block_size), votes_idx[::2], votes_idx[1::2]))) + votes_idx[len(votes_idx)^1:]
+            votes_idx = await asyncio.gather(*(map(self.__max_index, count(msgbase, 3 * self.block_size), votes_idx[::2], votes_idx[1::2]))) + votes_idx[len(votes_idx)^1:]
         return await self.resolve(msgbase, votes_idx[0][0])
 
+def _transpose(values: Tuple[Tuple[int, ...], ...]) -> Tuple[Tuple[int, ...], ...]:
+    return tuple(map(tuple, zip(*values)))
+
 class MpcValidation(MpcBase):
-    def __init__(self, election: Election, talliers: Tuple[TallierConn, ...]):
-        super().__init__(election, talliers)
-
-        self.block_size = int(2 * math.ceil(math.sqrt(math.ceil(math.log2(self.p)))) ** 2)
-
     async def exchange(self, msgid: int, values: Tuple[Tuple[int, ...], ...]) -> Tuple[Tuple[int, ...], ...]:
         async def single_exchange(tallier: Optional[TallierConn], values: Tuple[int, ...]) -> Tuple[int, ...]:
             if not tallier:
                 return values
             await tallier.write(msgid, values)
-            return await tallier.read(msgid)
-        return tuple(await asyncio.gather(*map(single_exchange, self.talliers, values)))
+            return (await tallier.read(msgid))[:len(values)]
+        return _transpose(tuple(await asyncio.gather(*map(single_exchange, self.talliers, _transpose(values)))))
 
     async def multiply(self, msgid: int, a_i: Tuple[int, ...], b_i: Tuple[int, ...]) -> Tuple[int, ...]:
         res_i = await self.exchange(msgid, tuple(self.gen_shamir((a * b) % self.p) for a, b in zip(a_i, b_i)))
@@ -252,7 +253,7 @@ class MpcValidation(MpcBase):
         return all(await asyncio.gather(self.validate_range(msgbase, votes, self.M - 1),
                                         two_stage_permute(msgbase + self.M)))
 
-    async def validate(self, msgid: int, votes: Tuple[int, ...]) -> Awaitable[bool]:
+    def validate(self, msgid: int, votes: Tuple[int, ...]) -> Awaitable[bool]:
         if self.election.selected_election_type == ElectionType.approval:
             return self.validate_approval(msgid, votes)
         if self.election.selected_election_type == ElectionType.plurality:

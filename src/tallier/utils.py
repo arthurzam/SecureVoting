@@ -18,6 +18,11 @@ from itertools import starmap
 import operator
 
 
+def clean_gen_shamir(value: int, key_count: int, threshold: int, p: int) -> tuple[int]:
+    a_i = [value] + choices(range(p), k=threshold - 1)
+    return tuple(sum(a * pow(x + 1, i, p) for i, a in enumerate(a_i)) % p for x in range(key_count))
+
+
 def gen_shamir(value: int, key_count: int, threshold: int, p: int) -> [[int, int]]:
     a_i = [value] + choices(range(p), k=threshold - 1)
     return tuple((x, sum((a * x ** i for i, a in enumerate(a_i))) % p) for x in range(1, key_count + 1))

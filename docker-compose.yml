@@ -28,8 +28,10 @@ services:
       - avote_ca.crt
       - source: avote1_key.pem
         target: certfile.pem
+    environment:
+      TALLIERS_INTERNAL: ${TALLIERS_INTERNAL}
     ports:
-      # - "18080:8080"
+      - "18080:18080"
       - "8080:8080"
 
   avote2:
@@ -46,31 +48,37 @@ services:
       - avote_ca.crt
       - source: avote2_key.pem
         target: certfile.pem
+    environment:
+      TALLIERS_INTERNAL: ${TALLIERS_INTERNAL}
     ports:
-      # - "18080:8080"
-      - "8081:8080"
+      - "18080:18080"
+      - "8080:8080"
 
   avote3:
     command: ["3"]
     depends_on:
       db:
         condition: service_healthy
-    build:
-      context: ./src/tallier
-      dockerfile: Dockerfile
+    build: src/tallier
     volumes:
       - ./src/tallier:/app/:ro
+    environment:
+      TALLIERS_INTERNAL: "${TALLIERS_INTERNAL}"
     secrets:
       - avote_ca.crt
       - source: avote3_key.pem
         target: certfile.pem
     ports:
-      # - "18080:8080"
-      - "8082:8080"
+      - "18080:18080"
+      - "8080:8080"
 
   webserver:
     image: avote_webserver
     build: src/webserver
+    env_file:
+      - .env
+    # environment:
+    #   TALLIERS_EXTERNAL: "${TALLIERS_EXTERNAL}"
     ports:
       - 80:5000
   

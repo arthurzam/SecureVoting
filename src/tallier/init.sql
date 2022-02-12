@@ -29,9 +29,9 @@ CREATE TABLE running_election (
     vote_vector int[]
 );
 
-CREATE OR REPLACE FUNCTION sum_int_arrays(int[], int[]) RETURNS int[]
+CREATE OR REPLACE FUNCTION sum_int_arrays(int[], int[], int) RETURNS int[]
 LANGUAGE SQL immutable AS $$
-    SELECT ARRAY_AGG(COALESCE(a, 0) + b)
+    SELECT ARRAY_AGG((COALESCE(a, 0) + b) % $3)
     FROM UNNEST($1, $2) AS u(a, b)
 $$;
 

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Election Vote</title>
+    <script>
+      function borda_handleDragStart(e) {
+        this.style.opacity = '0.4';
+        dragSrcEl = this;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/html', this.innerHTML);
+      }
+      function borda_handleDrop(e) {
+        e.stopPropagation(); // stops the browser from redirecting.
+        if (dragSrcEl !== this) {
+          dragSrcEl.innerHTML = this.innerHTML;
+          this.innerHTML = e.dataTransfer.getData('text/html');
+          let temp = this.getAttribute('value');
+          this.setAttribute('value', dragSrcEl.getAttribute('value'));
+          dragSrcEl.setAttribute('value', temp);
+        }
+        return false;
+      }
+      function borda_handleDragEnd(e) {
+        this.style.opacity = '1';
+        document.querySelectorAll('.box').forEach((item) => {
+          item.classList.remove('over');
+        });
+      }
+      function borda_handleDragOver(e) {
+        if (e.preventDefault)
+          e.preventDefault();
+        return false;
+      }
+      function borda_handleDragEnter(e) {
+        this.classList.add('over');
+      }
+      function borda_handleDragLeave(e) {
+        this.classList.remove('over');
+      }
+
+      function addmod(x, y, n) {
+        if (x + y <= x) x = x - (n - y) % n;
+        else x = (x + y) % n;
+        return x;
+      }
+      function sqrmod(a, n) {
+        var b, sum = 0;
+        a = a % n;
+        for (b = a; b != 0; b >>= 1) {
+          if (b & 1) {
+            sum = addmod(sum, a, n);
+          }
+          a = addmod(a, a, n);
+        }
+        return sum;
+      }
+      function expmod( base, exp, mod ){
+        if(exp === 0) 
+          return 1;
+        else if(exp % 2 === 0)
+          return sqrmod(expmod(base, exp / 2, mod) % mod, mod);
+        else 
+          return (base * expmod(base, exp - 1, mod)) % mod;
+      }
+      function gen_shamir(value, key_count, threshold, p) {
+        const coeef = [value].concat(Array.from(Array(threshold - 1).keys(), () => Math.floor(Math.random() * p)));
+        const sum_func = (accumulator, currentValue) => addmod(accumulator, currentValue, p);
+        return Array.from(Array(key_count).keys(), (x) => Array.from(coeef, (a, i) => (a * expmod(x + 1, i, p)) % p).reduce(sum_func));
+      }
+      function votesystem_range(name, idx) {
+        const row = document.createElement('tr');
+        let cell = document.createElement('td');
+        const range = document.createElement('input');
+        range.type = 'range';
+        range.min = 0;
+        range.setAttribute('value', 0);
+        range.value = 0;
+        range.max = config.L;
+        range.name = range.id = `value${idx}`;
+        cell.appendChild(range);
+        const label = document.createElement('label');
+        label.htmlFor = `value${idx}`;
+        label.textContent = `${name} (0)`;
+        range.addEventListener('change', (event) => {
+          label.textContent = `${name} (${event.target.value})`;
+          event.target.setAttribute('value', event.target.value);
+        });
+        cell.appendChild(label);
+        row.appendChild(cell);
+        return row;
+      }
+      function votesystem_radio(name, idx, inverse) {
+        const row = document.createElement('tr');
+        let cell = document.createElement('input');
+        cell.type = 'radio';
+        cell.id = `value${idx}`;
+        cell.name = 'vote';
+        cell.addEventListener('change', (event) => {
+          event.target.value = (event.target.checked != inverse ? 1 : 0);
+        });
+        cell.checked = (idx == 0);
+        cell.value = (cell.checked != inverse ? 1 : 0);
+
+        row.appendChild(cell);
+        cell = document.createElement('label');
+        cell.htmlFor  = `value${idx}`;
+        cell.appendChild(document.createTextNode(name));
+        row.appendChild(cell);
+        return row;
+      }
+      function votesystem_checkbox(name, idx) {
+        const row = document.createElement('tr');
+        let cell = document.createElement('input');
+        cell.type = 'checkbox';
+        cell.name = cell.id = `value${idx}`;
+        cell.value = 0;
+        cell.addEventListener('change', (event) => {
+          event.target.value = (event.target.checked ? 1 : 0);
+        });
+        row.appendChild(cell);
+        cell = document.createElement('label');
+        cell.htmlFor  = `value${idx}`;
+        cell.appendChild(document.createTextNode(name));
+        row.appendChild(cell);
+        return row;
+      }
+      function votesystem_borda(name, idx) {
+        const row = document.createElement('tr');
+        const box = document.createElement('div');
+        box.draggable = true;
+        box.classList.add('box');
+        box.id = `value${idx}`;
+        box.setAttribute('value', idx);
+        box.addEventListener('dragstart', borda_handleDragStart, false);
+        box.addEventListener('dragover', borda_handleDragOver, false);
+        box.addEventListener('dragenter', borda_handleDragEnter, false);
+        box.addEventListener('dragleave', borda_handleDragLeave, false);
+        box.addEventListener('dragend', borda_handleDragEnd, false);
+        box.addEventListener('drop', borda_handleDrop, false);
+        box.appendChild(document.createTextNode(name));
+        row.appendChild(box);
+        return row;
+      }
+
+      if (!["email", "number"].every((name) => document.cookie.split(';').some((item) => item.trim().startsWith(`${name}=`)))) {
+        alert('You need to login');
+        location.href = '../login';
+      }
+
+      function cookies_login() {
+        return {
+          email: document.cookie.split('; ').find(row => row.startsWith('email=')).split('=')[1],
+          number: parseInt(document.cookie.split('; ').find(row => row.startsWith('number=')).split('=')[1]),
+        }
+      }
+      function load_config() {
+        const url = new URL(window.location.href);
+        const election_id = url.searchParams.get("id");
+        if (election_id == null) {
+          location.href = '../elections';
+        } else {
+          const tallier = {{talliers | tojson}}[0];
+          let exampleSocket = new WebSocket(`${tallier}/election`);
+          exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({ ...cookies_login(), id: election_id }));
+          exampleSocket.onclose = (event) => {
+            if (event.code !== 1000) {
+              alert("something failed");
+            }
+          };
+          exampleSocket.onmessage = (event) => {
+            config = JSON.parse(event.data);
+            const table = document.getElementById('candidates');
+            const gen_func = [
+              (n, i) => votesystem_radio(n, i, false),
+              votesystem_range,
+              votesystem_checkbox,
+              (n, i) => votesystem_radio(n, i, true),
+              votesystem_borda
+            ][config.rule || 0];
+            config.candidates.forEach((name, idx) => {
+              table.appendChild(gen_func(name, idx, 0));
+            });
+          };
+        }
+      }
+      function send_vector(votes) {
+        const talliers = {{talliers | tojson}};
+        const D = talliers.length, t = (D + 1) / 2;
+        const shares = Array.from(votes, (vote) => gen_shamir(vote, D, t, config.p));
+        console.log(shares);
+
+        const url = new URL(window.location.href);
+        const election_id = url.searchParams.get("id");
+
+        let OKs = 0;
+        const onmessage = (event) => alert(event.data);
+        const onclose = (event) => {
+          if (OKs < 0) {
+          } else if (event.code === 1000) {
+            OKs += 1;
+            if (OKs == talliers.length) {
+              alert('All OK');
+            }
+          } else {
+            OKs = -1;
+            alert(`Someone said no ${event.code}`);
+          }
+        };
+        talliers.forEach((tallier, idx) => {
+          console.log(`Hello ${idx}`);
+          let exampleSocket = new WebSocket(`${tallier}/elections/vote`);
+          exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({
+            ...cookies_login(),
+            id: election_id,
+            not_abstain: 1,
+            votes: Array.from(shares, (x) => x[idx])
+          }));
+          exampleSocket.onmessage = onmessage;
+          exampleSocket.onclose = onclose;
+        });
+      }
+      function send_vote() {
+        send_vector(Array.from(config.candidates, (name, idx) => parseInt(document.getElementById(`value${idx}`).getAttribute('value'))));
+      }
+      function abstain() {
+        send_vector(Array.from(config.candidates, (name, idx) => 0));
+      }
+    </script>
+    <style>
+      .container {
+        display: grid;
+        grid-template-columns: fit-content(60%);
+        gap: 5px;
+      }
+
+      .box {
+        border: 1px solid #666;
+        background-color: #eee;
+        border-radius: .5em;
+        padding: 5px;
+        cursor: move;
+      }
+      .box.over {
+        border: 2px dotted #666;
+      }
+    </style>
+  </head>
+  <body>
+    <form>
+      <div>
+        <h3>Candidates:</h3>
+        <table><tbody id="candidates"></tbody></table>
+      </div>
+      <input type="button" value="Abstain" onclick="abstain()" />
+      <input type="button" value="Send" onclick="send_vote()" />
+      <input type="reset" />
+    </form>
+    <script>
+      load_config();
+    </script>
+  </body>
+</html>

@@ -1,5 +1,6 @@
 from pathlib import Path
 import logging
+from typing import Optional, Tuple
 import uuid
 import asyncpg
 
@@ -57,7 +58,7 @@ class DBconn:
             async with self.conn.transaction():
                 await self.conn.execute("""
                     INSERT INTO elections(election_id, manager_email, name, selected_election_type, candidates, winner_count, p, l)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 """, election.election_id, election.manager_email, election_name, election.selected_election_type.name, election.candidates, election.winner_count,
                     election.p, election.L)
                 
@@ -81,6 +82,32 @@ class DBconn:
             return mytypes.Election(election_id, values['manager_email'], mytypes.ElectionType[values['selected_election_type']],
                                     values['candidates'], values['winner_count'], values['p'], values['l'])
     
+    async def start_election(self, election: mytypes.Election) -> bool:
+        try:
+            async with self.conn.transaction():
+                await self.conn.execute("""
+                    INSERT INTO running_election(election_id, vote_vector)
+                    VALUES ($1, $2)
+                """, election.election_id, [0] * len(election.candidates))
+            return True
+        except asyncpg.UniqueViolationError:
+            return False
+    
+    async def stop_election(self, election: mytypes.Election) -> Optional[Tuple[int, ...]]:
+        async with self.conn.transaction():
+            vote_vector = await self.conn.fetchval("""
+                SELECT vote_vector
+                FROM running_election
+                WHERE election_id = $1
+            """, election.election_id)
+            if vote_vector is None:
+                return None
+            await self.conn.execute("""
+                DELETE FROM running_election
+                WHERE election_id = $1
+            """, election.election_id)
+            return tuple(vote_vector)
+    
     async def vote_status(self, election_id: uuid.UUID, email: str) -> int:
         async with self.conn.transaction():
             status = await self.conn.fetchval("""
@@ -92,13 +119,19 @@ class DBconn:
                 raise ValueError()
             return status
 
-    async def vote(self, election_id: uuid.UUID, ballot: tuple[int]):
+    async def vote(self, election: mytypes.Election, ballot: tuple[int], email:str, vote_status: int) -> None:
         async with self.conn.transaction():
+            logger.info(f"voting with {ballot}")
             await self.conn.execute("""
                 UPDATE running_election
-                SET vote_vector = sum_int_arrays($2::int[], vote_vector)
+                SET vote_vector = sum_int_arrays($2::int[], vote_vector, $3)
                 WHERE election_id = $1
-            """, election_id, ballot)
+            """, election.election_id, ballot, election.p)
+            await self.conn.execute("""
+                UPDATE election_votes
+                SET vote_state = $1
+                WHERE election_id = $2 AND email = $3
+            """, vote_status, election.election_id, email)
 
     async def __create_tables(self) -> None:
         try:

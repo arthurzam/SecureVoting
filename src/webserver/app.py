@@ -1,8 +1,11 @@
 import flask
+import os
+
 
 app = flask.Flask(__name__)
 
-TALLIERS = ['127.0.0.1:8080', '127.0.0.1:8081', '127.0.0.1:8082']
+print('Hello', os.environ)
+TALLIERS = os.getenv('TALLIERS_EXTERNAL').split('|')
 TALLIERS = ['ws://' + x for x in TALLIERS]
 CSP = f"connect-src 'self' {' '.join(TALLIERS)};"
 
@@ -17,7 +20,7 @@ def apply_caching(response):
 
 @app.route('/')
 def hello_world():
-    return 'Hello, Docker!'
+    return flask.redirect('login')
 
 @app.route('/register')
 def register():
@@ -31,6 +34,10 @@ def login():
 @app.route('/election/create')
 def election_create():
     return flask.render_template('election_create.html')
+
+@app.route('/election/vote')
+def election_vote():
+    return flask.render_template('election_vote.html')
 
 @app.route('/elections')
 def elections():
