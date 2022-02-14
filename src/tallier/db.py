@@ -39,19 +39,26 @@ class DBconn:
                 SELECT COUNT(*) FROM users WHERE email = $1 AND secret_number = $2
             """, email, secret_number)
     
-    async def get_elections_ids(self, email: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    async def get_elections_ids(self, email: str):
         async with self.conn.transaction():
             managed = await self.conn.fetch("""
-                SELECT name, election_id FROM elections WHERE manager_email = $1
+                SELECT election_id, name, COUNT(email) FILTER(WHERE vote_state = 1) AS voted, (running_election.vote_vector IS NOT NULL) AS is_running
+                FROM election_votes JOIN elections USING (election_id)
+                LEFT JOIN running_election USING (election_id)
+                WHERE manager_email = $1
+                GROUP BY election_id, name, running_election.vote_vector
             """, email)
             voting = await self.conn.fetch("""
-                SELECT name, election_id
+                SELECT name, election_id, (vote_state = 1) AS have_voted, (running_election.vote_vector IS NOT NULL) AS is_running
                 FROM election_votes JOIN elections USING (election_id)
+                LEFT JOIN running_election USING (election_id)
                 WHERE email = $1
             """, email)
-            def output(record):
-                return f"{record['name']},{record['election_id']}"
-            return tuple(map(output, managed)), tuple(map(output, voting))
+            def output1(record):
+                return {k: str(record[k]) for k in ('name', 'election_id', 'voted', 'is_running')}
+            def output2(record):
+                return {k: str(record[k]) for k in ('name', 'election_id', 'have_voted', 'is_running')}
+            return tuple(map(output1, managed)), tuple(map(output2, voting))
     
     async def create_election(self, election_name: str, election: mytypes.Election, voters: tuple[str, ...]) -> bool:
         try:

@@ -17,12 +17,12 @@
           } else if (event.code === 1000) {
             OKs += 1;
             if (OKs == talliers.length) {
-              alert('All OK');
+              alert('An email has been sent, check your spam as well');
               location.href = 'login';
             }
           } else {
             OKs = -1;
-            alert('Someone said no');
+            alert('An error had occurred - Registration failed');
           }
         };
         talliers.forEach(tallier => {

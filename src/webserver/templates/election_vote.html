@@ -200,7 +200,8 @@
           } else if (event.code === 1000) {
             OKs += 1;
             if (OKs == talliers.length) {
-              alert('All OK');
+              alert('Ballot accepted');
+              location.href = '../elections';
             }
           } else {
             OKs = -1;

@@ -14,6 +14,10 @@ from mytypes import Election, ElectionType
 
 running_elections: Dict[UUID, MpcValidation] = {}
 
+def get_user_id(email: str):
+    from hashlib import sha1
+    return int(sha1(email.encode("utf-8")).hexdigest(), 16) % 2147483647
+
 
 def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_talliers):
     logging.getLogger('websockets.server').setLevel(logging.WARN)
@@ -105,11 +109,11 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                 not_abstain = message['not_abstain']
                 db_status = await db.vote_status(election.election_id, email)
 
-                if not await running_elections[election.election_id].validate(1, votes):
+                if db_status != 0 or not await running_elections[election.election_id].validate(get_user_id(email), votes):
                     logger.info("Invalid vote for %s in election %s", email, election.election_id)
                     return await websocket.close(code=1007)
 
-                await db.vote(election, votes, email, db_status)
+                await db.vote(election, votes, email, 1)
                 return await websocket.close(code=1000)
 
         except json.JSONDecodeError:

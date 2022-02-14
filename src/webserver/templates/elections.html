@@ -46,28 +46,35 @@
           const managed = document.getElementById('managed');
           obj.managed.forEach(election => {
             const row = document.createElement('tr');
-            const [name, id] = election.split(',');
-            row.appendChild(build_label(name));
-            row.appendChild(build_label(id));
-            row.appendChild(build_button('Start', (event) => {
-              console.log(`Start ${id}`);
-              send_all('elections/start', { id: id });
-            }));
-            row.appendChild(build_button('Stop', (event) => {
-              send_all('elections/stop', { id: id });
-            }));
+            row.appendChild(build_label(election.name));
+            row.appendChild(build_label(election.election_id.split('-')[0]));
+            if (election.is_running == "False") {
+              row.appendChild(build_button('Start', (event) => {
+                send_all('elections/start', { id: election.election_id });
+              }));
+            } else {
+              row.appendChild(build_button('Stop', (event) => {
+                send_all('elections/stop', { id: election.election_id });
+              }));
+              row.appendChild(build_label(`${election.voted} have voted`));
+            }
             managed.appendChild(row);
           });
 
           const voting = document.getElementById('voting');
           obj.voting.forEach(election => {
             const row = document.createElement('tr');
-            const [name, id] = election.split(',');
-            row.appendChild(build_label(name));
-            row.appendChild(build_label(id));
-            row.appendChild(build_button('Vote', (event) => {
-              location.href = `election/vote?id=${id}`;
-            }));
+            row.appendChild(build_label(election.name));
+            row.appendChild(build_label(election.election_id.split('-')[0]));
+            if (election.is_running == "False") {
+              row.appendChild(build_label("Not running"));
+            } else if (election.have_voted == "False") {
+              row.appendChild(build_button('Vote', (event) => {
+                location.href = `election/vote?id=${election.election_id}`;
+              }));
+            } else {
+              row.appendChild(build_label("Already voted"));
+            }
             voting.appendChild(row);
           });
         };
@@ -83,6 +90,7 @@
             OKs += 1;
             if (OKs == talliers.length) {
               alert('All OK');
+              location.reload();
             }
           } else {
             OKs = -1;
