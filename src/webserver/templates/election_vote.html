@@ -166,6 +166,7 @@
           exampleSocket.onclose = (event) => {
             if (event.code !== 1000) {
               alert("something failed");
+              location.href = '../elections';
             }
           };
           exampleSocket.onmessage = (event) => {
@@ -184,7 +185,8 @@
           };
         }
       }
-      function send_vector(votes) {
+      function send_vector(not_abstain) {
+        const votes = Array.from(config.candidates, (name, idx) => parseInt(document.getElementById(`value${idx}`).getAttribute('value')));
         const talliers = {{talliers | tojson}};
         const D = talliers.length, t = (D + 1) / 2;
         const shares = Array.from(votes, (vote) => gen_shamir(vote, D, t, config.p));
@@ -214,18 +216,12 @@
           exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({
             ...cookies_login(),
             id: election_id,
-            not_abstain: 1,
+            not_abstain: not_abstain,
             votes: Array.from(shares, (x) => x[idx])
           }));
           exampleSocket.onmessage = onmessage;
           exampleSocket.onclose = onclose;
         });
-      }
-      function send_vote() {
-        send_vector(Array.from(config.candidates, (name, idx) => parseInt(document.getElementById(`value${idx}`).getAttribute('value'))));
-      }
-      function abstain() {
-        send_vector(Array.from(config.candidates, (name, idx) => 0));
       }
     </script>
     <style>
@@ -253,8 +249,8 @@
         <h3>Candidates:</h3>
         <table><tbody id="candidates"></tbody></table>
       </div>
-      <input type="button" value="Abstain" onclick="abstain()" />
-      <input type="button" value="Send" onclick="send_vote()" />
+      <input type="button" value="Abstain" onclick="send_vector(0)" />
+      <input type="button" value="Send" onclick="send_vector(1)" />
       <input type="reset" />
     </form>
     <script>

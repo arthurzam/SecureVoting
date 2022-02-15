@@ -250,14 +250,13 @@ class TallierManager:
         talliers = await self.start_clique(election.election_id, wanted_talliers, self_id, tallier_factory)
         mpc = MpcWinner(election, talliers)
         try:
-            votes, names, winners = list(votes_vector), election.candidates, []
+            votes, names, winners = list(votes_vector), list(election.candidates), []
             for i in range(election.winner_count):
                 logger.info('phase %d', i)
                 winner = await mpc.max(0, votes)
                 winners.append(names[winner])
                 del votes[winner]
                 del names[winner]
-            logger.info('Winners %s', winners)
             return tuple(winners)
         finally:
             await mpc.close()

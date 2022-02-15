@@ -66,9 +66,9 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                 print(message)
                 if not await db.login(message['email'], int(message['number'])):
                     return await websocket.close(code=1008)
-                election = Election(UUID(message['id']), message['email'], ElectionType(message['rule']), message['candidates'],
+                election = Election(UUID(message['id']), message['name'], message['email'], ElectionType(message['rule']), message['candidates'],
                                     message['K'], message['p'], message['L'])
-                res = await db.create_election(message['name'], election, tuple(message['voters']))
+                res = await db.create_election(election, tuple(set(message['voters'])))
                 return await websocket.close(code=(1000 if res else 1008))
 
             elif path == "/elections/start":
@@ -78,7 +78,10 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
 
                 await db.start_election(election)
                 running_elections[election.election_id] = await manager.start_election_voting(election, wanted_talliers, tallier_id)
-                # TODO: notify all voters & manager
+                if tallier_id == 0:
+                    from mail import start_election
+                    manager_name, voters = await db.get_election_extra_data(election.election_id)
+                    start_election(manager_name, election, voters)
                 return await websocket.close(code=1000)
 
             elif path == "/elections/stop":
@@ -90,7 +93,14 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
 
                 if vote_vector := await db.stop_election(election):
                     await running_elections.pop(election.election_id).close()
-                    asyncio.ensure_future(manager.calc_winners(election, wanted_talliers, tallier_id, vote_vector))
+                    async def calc_winners():
+                        winners = await manager.calc_winners(election, wanted_talliers, tallier_id, vote_vector)
+                        if tallier_id == 0:
+                            from mail import stop_election
+                            manager_name, voters = await db.get_election_extra_data(election.election_id)
+                            stop_election(manager_name, election, voters, winners)
+                            await db.delete_election(election)
+                    asyncio.ensure_future(calc_winners())
                     return await websocket.close(code=1000)
                 else:
                     return await websocket.close(code=1008)
@@ -108,6 +118,10 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                     return await websocket.close(code=1007)
                 not_abstain = message['not_abstain']
                 db_status = await db.vote_status(election.election_id, email)
+
+                if int(not_abstain) == 0:
+                    logger.info("Abstain for %s in election %s", email, election.election_id)
+                    return await websocket.close(code=1000)
 
                 if db_status != 0 or not await running_elections[election.election_id].validate(get_user_id(email), votes):
                     logger.info("Invalid vote for %s in election %s", email, election.election_id)

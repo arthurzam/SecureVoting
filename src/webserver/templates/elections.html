@@ -50,11 +50,11 @@
             row.appendChild(build_label(election.election_id.split('-')[0]));
             if (election.is_running == "False") {
               row.appendChild(build_button('Start', (event) => {
-                send_all('elections/start', { id: election.election_id });
+                send_all('elections/start', { id: election.election_id }, 'Election Started.\nEmails have been sent to all participants.');
               }));
             } else {
               row.appendChild(build_button('Stop', (event) => {
-                send_all('elections/stop', { id: election.election_id });
+                send_all('elections/stop', { id: election.election_id }, 'Election closed.\nEmails with results have been sent to all participants.');
               }));
               row.appendChild(build_label(`${election.voted} have voted`));
             }
@@ -80,7 +80,7 @@
         };
       }
 
-      function send_all(path, content) {
+      function send_all(path, content, message) {
         const talliers = {{talliers | tojson}};
         let OKs = 0;
         const onmessage = (event) => alert(event.data);
@@ -89,7 +89,7 @@
           } else if (event.code === 1000) {
             OKs += 1;
             if (OKs == talliers.length) {
-              alert('All OK');
+              alert(message);
               location.reload();
             }
           } else {

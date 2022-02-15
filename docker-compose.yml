@@ -22,8 +22,6 @@ services:
     build:
       context: ./src/tallier
       dockerfile: Dockerfile
-    volumes:
-      - ./src/tallier:/app/:ro
     secrets:
       - avote_ca.crt
       - source: avote1_key.pem
@@ -42,8 +40,6 @@ services:
     build:
       context: ./src/tallier
       dockerfile: Dockerfile
-    volumes:
-      - ./src/tallier:/app/:ro
     secrets:
       - avote_ca.crt
       - source: avote2_key.pem
@@ -60,8 +56,6 @@ services:
       db:
         condition: service_healthy
     build: src/tallier
-    volumes:
-      - ./src/tallier:/app/:ro
     environment:
       TALLIERS_INTERNAL: "${TALLIERS_INTERNAL}"
     secrets:
@@ -77,8 +71,8 @@ services:
     build: src/webserver
     env_file:
       - .env
-    # environment:
-    #   TALLIERS_EXTERNAL: "${TALLIERS_EXTERNAL}"
+    environment:
+      TALLIERS_EXTERNAL: "${TALLIERS_EXTERNAL}"
     ports:
       - 80:5000
   

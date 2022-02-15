@@ -17,14 +17,13 @@
           } else if (event.code === 1000) {
             OKs += 1;
             if (OKs == talliers.length) {
-              alert('All OK');
-              document.cookie = `email=${email}; SameSite=Lax; max-age=600`
-              document.cookie = `number=${number}; SameSite=Lax; max-age=600`
+              document.cookie = `email=${email}; SameSite=Lax; max-age=1200`;
+              document.cookie = `number=${number}; SameSite=Lax; max-age=1200`;
               location.href = 'elections';
             }
           } else {
             OKs = -1;
-            alert('Someone said no');
+            alert('Login Failed');
           }
         };
         talliers.forEach(tallier => {

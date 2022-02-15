@@ -60,13 +60,13 @@ class DBconn:
                 return {k: str(record[k]) for k in ('name', 'election_id', 'have_voted', 'is_running')}
             return tuple(map(output1, managed)), tuple(map(output2, voting))
     
-    async def create_election(self, election_name: str, election: mytypes.Election, voters: tuple[str, ...]) -> bool:
+    async def create_election(self, election: mytypes.Election, voters: tuple[str, ...]) -> bool:
         try:
             async with self.conn.transaction():
                 await self.conn.execute("""
                     INSERT INTO elections(election_id, manager_email, name, selected_election_type, candidates, winner_count, p, l)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                """, election.election_id, election.manager_email, election_name, election.selected_election_type.name, election.candidates, election.winner_count,
+                """, election.election_id, election.manager_email, election.election_name, election.selected_election_type.name, election.candidates, election.winner_count,
                     election.p, election.L)
                 
                 await self.conn.execute("""
@@ -80,14 +80,29 @@ class DBconn:
     async def get_election(self, election_id: uuid.UUID) -> mytypes.Election:
         async with self.conn.transaction():
             values = await self.conn.fetchrow("""
-                SELECT manager_email, selected_election_type, candidates, winner_count, p, l
+                SELECT name, manager_email, selected_election_type, candidates, winner_count, p, l
                 FROM elections
                 WHERE election_id = $1
             """, election_id)
             if values is None:
                 raise ValueError()
-            return mytypes.Election(election_id, values['manager_email'], mytypes.ElectionType[values['selected_election_type']],
+            return mytypes.Election(election_id, values['name'], values['manager_email'],
+                                    mytypes.ElectionType[values['selected_election_type']],
                                     values['candidates'], values['winner_count'], values['p'], values['l'])
+            return False
+    
+    async def get_election_extra_data(self, election_id: uuid.UUID) -> Tuple[str, Tuple[str, ...]]:
+        async with self.conn.transaction():
+            values = await self.conn.fetchrow("""
+                SELECT users.name AS manager_name, ARRAY_AGG(election_votes.email) AS voters
+                FROM elections JOIN election_votes USING (election_id)
+                JOIN users ON (elections.manager_email = users.email)
+                WHERE election_id = $1
+                GROUP BY users.name;
+            """, election_id)
+            if values is None:
+                raise ValueError()
+            return (values['manager_name'], tuple(values['voters']))
     
     async def start_election(self, election: mytypes.Election) -> bool:
         try:
@@ -114,6 +129,11 @@ class DBconn:
                 WHERE election_id = $1
             """, election.election_id)
             return tuple(vote_vector)
+    
+    async def delete_election(self, election: mytypes.Election):
+        async with self.conn.transaction():
+            for table in ('election_votes', 'elections'):
+                await self.conn.execute(f"DELETE FROM {table} WHERE election_id = $1", election.election_id)
     
     async def vote_status(self, election_id: uuid.UUID, email: str) -> int:
         async with self.conn.transaction():
