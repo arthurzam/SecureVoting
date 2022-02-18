@@ -1,139 +1,108 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>All Elections</title>
-    <script>
-      if (!["email", "number"].every((name) => document.cookie.split(';').some((item) => item.trim().startsWith(`${name}=`)))) {
-        alert('You need to login');
-        location.href = '../login';
+{% extends 'base.html' %}
+
+{% block title %}All Elections{% endblock %}
+
+{% block head %}
+<script>
+  login_required();
+
+  function build_table() {
+    let sock = new WebSocket(`${talliers[0]}/elections`);
+    sock.onopen = (event) => sock.send(JSON.stringify(cookies_login()));
+    sock.onclose = (event) => {
+      if (event.code !== 1000) {
+        alert("something failed");
       }
+    };
+    sock.onmessage = (event) => {
+      const obj = JSON.parse(event.data);
 
-      function cookies_login() {
-        return {
-          email: document.cookie.split('; ').find(row => row.startsWith('email=')).split('=')[1],
-          number: parseInt(document.cookie.split('; ').find(row => row.startsWith('number=')).split('=')[1]),
-        }
-      }
+      const build_label = (text) => {
+        const cell = document.createElement('td');
+        cell.appendChild(document.createTextNode(text));
+        return cell;
+      };
+      const build_button = (label, func) => {
+        const cell = document.createElement('td');
+        const btn = document.createElement('input');
+        btn.type = 'button';
+        btn.onclick = func;
+        btn.value = label;
+        cell.appendChild(btn);
+        return cell;
+      };
 
-      function build_table() {
-        const tallier = {{talliers | tojson}}[0];
-        let exampleSocket = new WebSocket(`${tallier}/elections`);
-        exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify(cookies_login()));
-        exampleSocket.onclose = (event) => {
-          if (event.code !== 1000) {
-            alert("something failed");
-          }
-        };
-        exampleSocket.onmessage = (event) => {
-          const obj = JSON.parse(event.data);
-
-          const build_label = (text) => {
-            const cell = document.createElement('td');
-            cell.appendChild(document.createTextNode(text));
-            return cell;
-          };
-          const build_button = (label, func) => {
-            const cell = document.createElement('td');
-            const btn = document.createElement('input');
-            btn.type = 'button';
-            btn.onclick = func;
-            btn.value = label;
-            cell.appendChild(btn);
-            return cell;
-          };
-
-          const managed = document.getElementById('managed');
-          obj.managed.forEach(election => {
-            const row = document.createElement('tr');
-            row.appendChild(build_label(election.name));
-            row.appendChild(build_label(election.election_id.split('-')[0]));
-            if (election.is_running == "False") {
-              row.appendChild(build_button('Start', (event) => {
-                send_all('elections/start', { id: election.election_id }, 'Election Started.\nEmails have been sent to all participants.');
-              }));
-            } else {
-              row.appendChild(build_button('Stop', (event) => {
-                send_all('elections/stop', { id: election.election_id }, 'Election closed.\nEmails with results have been sent to all participants.');
-              }));
-              row.appendChild(build_label(`${election.voted} have voted`));
-            }
-            managed.appendChild(row);
-          });
-
-          const voting = document.getElementById('voting');
-          obj.voting.forEach(election => {
-            const row = document.createElement('tr');
-            row.appendChild(build_label(election.name));
-            row.appendChild(build_label(election.election_id.split('-')[0]));
-            if (election.is_running == "False") {
-              row.appendChild(build_label("Not running"));
-            } else if (election.have_voted == "False") {
-              row.appendChild(build_button('Vote', (event) => {
-                location.href = `election/vote?id=${election.election_id}`;
-              }));
-            } else {
-              row.appendChild(build_label("Already voted"));
-            }
-            voting.appendChild(row);
-          });
-        };
-      }
-
-      function send_all(path, content, message) {
-        const talliers = {{talliers | tojson}};
-        let OKs = 0;
-        const onmessage = (event) => alert(event.data);
-        const onclose = (event) => {
-          if (OKs < 0) {
-          } else if (event.code === 1000) {
-            OKs += 1;
-            if (OKs == talliers.length) {
-              alert(message);
+      const managed = document.getElementById('managed');
+      obj.managed.forEach(election => {
+        const row = document.createElement('tr');
+        row.appendChild(build_label(election.name));
+        row.appendChild(build_label(election.election_id.split('-')[0]));
+        if (election.is_running == "False") {
+          row.appendChild(build_button('Start', (event) => communicate(
+            "elections/start", { ...cookies_login(), id: election.election_id }, (event) => {
+              alert('Election Started.\nEmails have been sent to all participants.');
               location.reload();
-            }
-          } else {
-            OKs = -1;
-            alert('Someone said no');
-          }
-        };
-        talliers.forEach(tallier => {
-          let exampleSocket = new WebSocket(`${tallier}/${path}`);
-          exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({
-            ...cookies_login(),
-            ...content
-          }));
-          exampleSocket.onmessage = onmessage;
-          exampleSocket.onclose = onclose;
-        });
-      }
-    </script>
-  </head>
-  <body>
-    <form id="form">
-      <a href="election/create">Create Election</a>
-      <h3>Managed by me</h3>
-      <table border="1">
-        <tbody id="managed">
-          <tr>
-            <th>Name</th>
-            <th>UUID</th>
-          </tr>
-        </tbody>
-      </table>
-      <h3>Can Vote</h3>
-      <table border="1">
-        <tbody id="voting">
-          <tr>
-            <th>Name</th>
-            <th>UUID</th>
-          </tr>
-        </tbody>
-      </table>
+            }, (event) => {
+              alert('Something failed.');
+            })));
+        } else {
+          row.appendChild(build_button('Stop', (event) => communicate(
+            "elections/stop", { ...cookies_login(), id: election.election_id }, (event) => {
+              alert('Election closed.\nEmails with results have been sent to all participants.');
+              location.reload();
+            }, (event) => {
+              alert('Something failed.');
+            })));
+          row.appendChild(build_label(`${election.voted} have voted`));
+        }
+        managed.appendChild(row);
+      });
 
-      <script>
-        build_table();
-      </script>
-    </form>
-  </body>
-</html>
+      const voting = document.getElementById('voting');
+      obj.voting.forEach(election => {
+        const row = document.createElement('tr');
+        row.appendChild(build_label(election.name));
+        row.appendChild(build_label(election.election_id.split('-')[0]));
+        if (election.is_running == "False") {
+          row.appendChild(build_label("Not running"));
+        } else if (election.have_voted == "False") {
+          row.appendChild(build_button('Vote', (event) => {
+            location.href = `election/vote?id=${election.election_id}`;
+          }));
+        } else {
+          row.appendChild(build_label("Already voted"));
+        }
+        voting.appendChild(row);
+      });
+    };
+  }
+</script>
+{% endblock %}
+
+{% block content %}
+<form id="form">
+  <a href="election/create">Create Election</a>
+  <h3>Managed by me</h3>
+  <table border="1">
+    <tbody id="managed">
+      <tr>
+        <th>Name</th>
+        <th>UUID</th>
+      </tr>
+    </tbody>
+  </table>
+  <h3>Can Vote</h3>
+  <table border="1">
+    <tbody id="voting">
+      <tr>
+        <th>Name</th>
+        <th>UUID</th>
+      </tr>
+    </tbody>
+  </table>
+
+  <script>
+    build_table();
+  </script>
+</form>
+{% endblock %}

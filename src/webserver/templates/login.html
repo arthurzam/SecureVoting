@@ -1,48 +1,29 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Login</title>
-    <script>
-      function login() {
-        const email = document.getElementById("tb_email").value;
-        const number = document.getElementById("tb_secret").value;
+{% extends 'base.html' %}
 
-        const talliers = {{talliers | tojson}};
-        let OKs = 0;
+{% block title %}Login{% endblock %}
 
-        const onmessage = (event) => alert(event.data);
-        const onclose = (event) => {
-          if (OKs < 0) {
-          } else if (event.code === 1000) {
-            OKs += 1;
-            if (OKs == talliers.length) {
-              document.cookie = `email=${email}; SameSite=Lax; max-age=1200`;
-              document.cookie = `number=${number}; SameSite=Lax; max-age=1200`;
-              location.href = 'elections';
-            }
-          } else {
-            OKs = -1;
-            alert('Login Failed');
-          }
-        };
-        talliers.forEach(tallier => {
-          let exampleSocket = new WebSocket(`${tallier}/login`);
-          exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({ email: email, number: number }));
-          exampleSocket.onmessage = onmessage;
-          exampleSocket.onclose = onclose;
-        });
-      }
-    </script>
-  </head>
-  <body>
-    <form>
-      <label for="tb_email">Enter your email:</label><br />
-      <input type="email" id="tb_email" size="20" required /><br />
-      <label for="tb_name">Enter your secret number:</label><br />
-      <input type="number" id="tb_secret" size="20" required /><br />
-      <input type="button" value="Login" onclick="login()">
-      <input type="reset">
-    </form>
-  </body>
-</html>
+{% block head %}
+<script>
+  function login() {
+    const email = document.getElementById("tb_email").value;
+    const number = document.getElementById("tb_secret").value;
+
+    communicate("login", { email: email, number: number }, (event) => {
+      document.cookie = `email=${email}; SameSite=Lax; max-age=1200`;
+      document.cookie = `number=${number}; SameSite=Lax; max-age=1200`;
+      location.href = 'elections';
+    }, (event) => alert('Login Failed'));
+  }
+</script>
+{% endblock %}
+
+{% block content %}
+<form>
+  <label for="tb_email">Enter your email:</label><br />
+  <input type="email" id="tb_email" size="20" required /><br />
+  <label for="tb_name">Enter your secret number:</label><br />
+  <input type="number" id="tb_secret" size="20" required /><br />
+  <input type="button" value="Login" onclick="login()">
+  <input type="reset">
+</form>
+{% endblock %}

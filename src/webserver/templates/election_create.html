@@ -1,203 +1,175 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Create Election</title>
-    <script>
-      if (!["email", "number"].every((name) => document.cookie.split(';').some((item) => item.trim().startsWith(`${name}=`)))) {
-        alert('You need to login');
-        location.href = '../login';
-      }
+{% extends 'base.html' %}
 
-      function cookies_login() {
-        return {
-          email: document.cookie.split('; ').find(row => row.startsWith('email=')).split('=')[1],
-          number: parseInt(document.cookie.split('; ').find(row => row.startsWith('number=')).split('=')[1]),
-        }
-      }
+{% block title %}Create Election{% endblock %}
 
-      function addVoter() {
-        const email = document.getElementById("voter_email").value;
-        const voters = document.getElementById("voters");
+{% block head %}
+<script>
+  login_required();
+
+  function addVoter() {
+    const email = document.getElementById("voter_email").value;
+    const voters = document.getElementById("voters");
+    if (email.length > 0) {
+      const option = document.createElement("option");
+      option.text = email;
+      option.value = email;
+      voters.appendChild(option);
+
+      document.getElementById("voter_email").value = '';
+    }
+  }
+
+  function loadCsv() {
+    const reader = new FileReader();
+    const voters = document.getElementById("voters");
+    reader.onload = event => {
+      event.target.result.split("\n").forEach(email => {
         if (email.length > 0) {
           const option = document.createElement("option");
           option.text = email;
           option.value = email;
           voters.appendChild(option);
-
-          document.getElementById("voter_email").value = '';
         }
-      }
+      })
+    };
+    [...document.getElementById("voters_csv").files].forEach((input) => {
+      reader.readAsText(input);
+    });
+  }
 
-      function loadCsv() {
-        const reader = new FileReader();
-        const voters = document.getElementById("voters");
-        reader.onload = event => {
-          event.target.result.split("\n").forEach(email => {
-            if (email.length > 0) {
-              const option = document.createElement("option");
-              option.text = email;
-              option.value = email;
-              voters.appendChild(option);
-            }
-          })
-        };
-        [...document.getElementById("voters_csv").files].forEach((input) => {
-          reader.readAsText(input);
-        });
-      }
+  function uuidv4() {
+    return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+      (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+    );
+  }
 
-      function uuidv4() {
-        return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
-          (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
-        );
-      }
+  function create() {
+    const election_id = uuidv4();
 
-      function create() {
-        const talliers = {{talliers | tojson}};
-        let OKs = 0;
+    communicate("elections/create", {
+      ...cookies_login(),
+      name: document.getElementById("name").value,
+      id: election_id,
+      candidates: document.getElementById("candidates").value.split('\n').map(s => s.trim()),
+      K: 1,
+      p: 2147483647,
+      L: 1,
+      rule: parseInt(document.getElementById("form").elements["rule"].value),
+      voters: [...document.getElementById("voters").options].map(o => o.text)
+    }, (event) => {
+      alert('Election Created Successfully');
+      location.href = '../elections';
+    }, (event) => alert('Creation failed'));
+  }
+</script>
+{% endblock %}
 
-        const onmessage = (event) => alert(event.data);
-        const onclose = (event) => {
-          if (OKs < 0) {
-          } else if (event.code === 1000) {
-            OKs += 1;
-            if (OKs == talliers.length) {
-              alert('Election Created Successfully');
-              location.href = '../elections';
-            }
-          } else {
-            OKs = -1;
-            alert('Someone said no');
-          }
-        };
-        const election_id = uuidv4();
-        talliers.forEach(tallier => {
-          let exampleSocket = new WebSocket(`${tallier}/elections/create`);
-          exampleSocket.onopen = (event) => exampleSocket.send(JSON.stringify({
-            ...cookies_login(),
-            name: document.getElementById("name").value,
-            id: election_id,
-            candidates: document.getElementById("candidates").value.split('\n').map(s => s.trim()),
-            K: 1,
-            p: 2147483647,
-            L: 1,
-            rule: parseInt(document.getElementById("form").elements["rule"].value),
-            voters: [...document.getElementById("voters").options].map(o => o.text)
-          }));
-          exampleSocket.onmessage = onmessage;
-          exampleSocket.onclose = onclose;
-        });
-      }
-    </script>
-  </head>
-  <body>
-    <form id="form">
-      <div id="part1">
-        <h3>(1) Election Configuration</h3>
-        <label for="name">Manager Email:</label><br />
-        <input type="text" id="email" style="width: 180px;" required disabled /><br />
-        <label for="name">Election Name:</label><br />
-        <input type="text" id="name" style="width: 180px;" required /><br />
-      </div>
+{% block content %}
+<form id="form">
+  <div id="part1">
+    <h3>(1) Election Configuration</h3>
+    <label for="name">Manager Email:</label><br />
+    <input type="text" id="email" style="width: 180px;" required disabled /><br />
+    <label for="name">Election Name:</label><br />
+    <input type="text" id="name" style="width: 180px;" required /><br />
+  </div>
 
-      <div id="part2" style="display: none;">
-        <h3>(2) Voting Rule</h3>
-        <table style="border: 0;">
-          <tbody>
-            <tr>
-              <td>
-                <input type="radio" id="rule_plurality" value="1" name="rule" checked="checked" />
-                <label for="rule_plurality">plurality</label>
-              </td>
-              <td>
-                <input type="radio" id="rule_approval" value="3" name="rule"  />
-                <label for="rule_approval">approval</label>
-              </td>
-            </tr>
-          </tr>
-          <tr>
-            <td>
-              <input type="radio" id="rule_veto" value="4" name="rule"  />
-              <label for="rule_veto">veto</label>
-            </td>
-            <!-- <td>
-              <input type="radio" id="rule_borda" value="5" name="rule"  />
-              <label for="rule_borda">borda</label>
-            </td> -->
-          </tr>
-          <tr>
-            <!-- <td colspan="2">
-              <input type="radio" id="rule_range" value="2" name="rule"  />
-              <label for="rule_range">range</label>
-            </td> -->
-          </tr>
-          </tbody>
-        </table><br />
-      </div>
+  <div id="part2" style="display: none;">
+    <h3>(2) Voting Rule</h3>
+    <table style="border: 0;">
+      <tbody>
+        <tr>
+          <td>
+            <input type="radio" id="rule_plurality" value="1" name="rule" checked="checked" />
+            <label for="rule_plurality">plurality</label>
+          </td>
+          <td>
+            <input type="radio" id="rule_approval" value="3" name="rule"  />
+            <label for="rule_approval">approval</label>
+          </td>
+        </tr>
+      </tr>
+      <tr>
+        <td>
+          <input type="radio" id="rule_veto" value="4" name="rule"  />
+          <label for="rule_veto">veto</label>
+        </td>
+        <!-- <td>
+          <input type="radio" id="rule_borda" value="5" name="rule"  />
+          <label for="rule_borda">borda</label>
+        </td> -->
+      </tr>
+      <tr>
+        <!-- <td colspan="2">
+          <input type="radio" id="rule_range" value="2" name="rule"  />
+          <label for="rule_range">range</label>
+        </td> -->
+      </tr>
+      </tbody>
+    </table><br />
+  </div>
 
-      <div id="part3" style="display: none;">
-        <h3>(3) Candidates</h3>
-        <p>Fill candidates name here, each in it's own line</p>
-        <textarea id="candidates" style="width: 180px; height: 6em;" required ></textarea><br/><br />
-        <!--<label for="winners">Winners Amount:</label>
-        <input type="number" id="winners" value="1" min="1" style="width: 50px;" required /><br />-->
-      </div>
-      
-      <div id="part4" style="display: none;">
-        <h3>(4) Voters</h3>
-        <select id="voters" size="5" style="width: 350px; height: 150px;" ></select><br />
-        <br />
-        <table style="border: 0;">
-          <tbody>
-            <tr>
-              <td><label for="voter_email">Email: </label></td>
-              <td><input type="text" id="voter_email"/></td>
-              <td><input type="button" value="Add" onclick="addVoter()"></td>
-            </tr>
-            <tr>
-              <td><label for="voters_csv">CSV source: </label></td>
-              <td><input type="file" id="voters_csv" accept=".csv" /></td>
-              <td><input type="button" value="Load" onclick="loadCsv()"></td>
-            </tr>
-          </tbody>
-        </table><br />
-      </div>
-      
-      <div id="part5" style="display: none;">
-        <input type="button" value="Create" onclick="create()">
-        <input type="button" value="Reset" onclick="location.reload()">
-      </div>
-    </form>
-    <script>
-      document.getElementById("email").value = cookies_login().email;
+  <div id="part3" style="display: none;">
+    <h3>(3) Candidates</h3>
+    <p>Fill candidates name here, each in it's own line</p>
+    <textarea id="candidates" style="width: 180px; height: 6em;" required ></textarea><br/><br />
+    <!--<label for="winners">Winners Amount:</label>
+    <input type="number" id="winners" value="1" min="1" style="width: 50px;" required /><br />-->
+  </div>
 
-      const make_btn = (label, func) => {
-        const btn = document.createElement('input');
-        btn.name = "navigation";
-        btn.type = 'button';
-        btn.onclick = func;
-        btn.value = label;
-        return btn;
-      }
+  <div id="part4" style="display: none;">
+    <h3>(4) Voters</h3>
+    <select id="voters" size="5" style="width: 350px; height: 150px;" ></select><br />
+    <br />
+    <table style="border: 0;">
+      <tbody>
+        <tr>
+          <td><label for="voter_email">Email: </label></td>
+          <td><input type="text" id="voter_email"/></td>
+          <td><input type="button" value="Add" onclick="addVoter()"></td>
+        </tr>
+        <tr>
+          <td><label for="voters_csv">CSV source: </label></td>
+          <td><input type="file" id="voters_csv" accept=".csv" /></td>
+          <td><input type="button" value="Load" onclick="loadCsv()"></td>
+        </tr>
+      </tbody>
+    </table><br />
+  </div>
 
-      for (let i = 1; i <= 3; i++) {
-        document.getElementById(`part${i + 1}`).appendChild(make_btn("Prev", (event) => {
-          document.getElementById(`part${i}`).style.display = "block";
-          document.getElementById(`part${i + 1}`).style.display = "none";
-        }));
+  <div id="part5" style="display: none;">
+    <input type="button" value="Create" onclick="create()">
+    <input type="button" value="Reset" onclick="location.reload()">
+  </div>
+</form>
+<script>
+  document.getElementById("email").value = cookies_login().email;
 
-        document.getElementById(`part${i}`).appendChild(make_btn("Next", (event) => {
-          document.getElementById(`part${i}`).style.display = "none";
-          document.getElementById(`part${i + 1}`).style.display = "block";
-        }));
-      }
-      document.getElementById(`part4`).appendChild(make_btn("Next", (event) => {
-        for (let i = 1; i <= 5; i++) {
-          document.getElementById(`part${i}`).style.display = "block";
-        }
-        document.getElementsByName("navigation").forEach(elem => elem.style.display = "none");
-      }));
-    </script>
-  </body>
-</html>
+  const make_btn = (label, func) => {
+    const btn = document.createElement('input');
+    btn.name = "navigation";
+    btn.type = 'button';
+    btn.onclick = func;
+    btn.value = label;
+    return btn;
+  }
+
+  for (let i = 1; i <= 3; i++) {
+    document.getElementById(`part${i + 1}`).appendChild(make_btn("Prev", (event) => {
+      document.getElementById(`part${i}`).style.display = "block";
+      document.getElementById(`part${i + 1}`).style.display = "none";
+    }));
+
+    document.getElementById(`part${i}`).appendChild(make_btn("Next", (event) => {
+      document.getElementById(`part${i}`).style.display = "none";
+      document.getElementById(`part${i + 1}`).style.display = "block";
+    }));
+  }
+  document.getElementById(`part4`).appendChild(make_btn("Next", (event) => {
+    for (let i = 1; i <= 5; i++) {
+      document.getElementById(`part${i}`).style.display = "block";
+    }
+    document.getElementsByName("navigation").forEach(elem => elem.style.display = "none");
+  }));
+</script>
+{% endblock %}

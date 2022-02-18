@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>{% block title %}{% endblock %}</title>
+    <script>
+      const talliers = {{talliers | tojson}};
+
+      function login_required() {
+        if (!["email", "number"].every((name) => document.cookie.split(';').some((item) => item.trim().startsWith(`${name}=`)))) {
+          alert('You need to login');
+          location.href = '../login';
+        }
+      }
+
+      function cookies_login() {
+        return {
+          email: document.cookie.split('; ').find(row => row.startsWith('email=')).split('=')[1],
+          number: parseInt(document.cookie.split('; ').find(row => row.startsWith('number=')).split('=')[1]),
+        }
+      }
+
+      function communicate(path, content, on_success, on_fail) {
+        let OKs = 0;
+        talliers.forEach((tallier, idx) => {
+          const sock = new WebSocket(`${tallier}/${path}`);
+          sock.onopen = (event) => sock.send(JSON.stringify(content));
+          sock.onerror = (event) => {
+            OKs = -1;
+            dot_bad(idx, '#888');
+            if (OKs < 0) {
+              on_fail(event);
+            }
+          };
+          sock.onclose = (event) => {
+            if (OKs < 0) {
+              dot_bad(idx, '#F00');
+            } else if (event.code === 1000) {
+              OKs += 1;
+              if (OKs == talliers.length) {
+                on_success(event);
+              }
+            } else {
+              OKs = -1;
+              dot_bad(idx, '#F00');
+              on_fail(event);
+            }
+          };
+        });
+      }
+
+      function dot_bad(idx, color) {
+        document.getElementById(`dor${idx}`).style.backgroundColor = color;
+      }
+    </script>
+    <style>
+      .dot {
+        height: 15px;
+        width: 15px;
+        background-color: #080;
+        border-radius: 50%;
+        display: inline-block;
+      }
+    </style>
+    {% block head %}{% endblock %}
+  </head>
+  <body>
+    <div id="conn_dots">Connection: </div>
+    <script>
+      talliers.forEach((elem, idx) => {
+        const dot = document.createElement("span");
+        dot.id = `dot${idx}`;
+        dot.className = "dot";
+        dot.title = elem;
+        document.getElementById("conn_dots").appendChild(dot);
+        document.getElementById("conn_dots").appendChild(document.createTextNode("  "));
+
+        // const label = document.createElement("label");
+        // label.appendChild(document.createTextNode(elem));
+        // document.getElementById("conn_dots").appendChild(label);
+      });
+    </script>
+    <br />
+    {% block content %}{% endblock %}
+  </body>
+</html>
