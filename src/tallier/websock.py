@@ -56,7 +56,6 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                 return await websocket.close(code=1000)
 
             elif path == "/elections/create":
-                print(message)
                 if not await db.login(message['email'], int(message['number'])):
                     return await websocket.close(code=1008)
                 election = Election(UUID(message['id']), message['name'], message['email'], ElectionType(message['rule']), message['candidates'],
