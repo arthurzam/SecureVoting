@@ -3,7 +3,7 @@ from uuid import UUID
 from enum import Enum
 
 
-class ElectionType(Enum):
+class ElectionType(int, Enum):
     plurality = 1
     range = 2
     approval = 3

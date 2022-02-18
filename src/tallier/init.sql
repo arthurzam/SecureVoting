@@ -29,6 +29,11 @@ CREATE TABLE running_election (
     vote_vector int[]
 );
 
+CREATE TABLE finished_election (
+    election_id uuid REFERENCES elections(election_id) PRIMARY KEY,
+    winners text[]
+);
+
 CREATE OR REPLACE FUNCTION sum_int_arrays(int[], int[], int) RETURNS int[]
 LANGUAGE SQL immutable AS $$
     SELECT ARRAY_AGG((COALESCE(a, 0) + b) % $3)

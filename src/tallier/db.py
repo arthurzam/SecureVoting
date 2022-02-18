@@ -14,7 +14,7 @@ class DBconn:
         self.user = user
         self.database = database
         self.conn: asyncpg.Connection = None
-    
+
     async def __aenter__(self):
         await self.__create_tables()
         self.conn = await asyncpg.connect(host='db', user=self.user, password='password', database=self.database)
@@ -38,28 +38,28 @@ class DBconn:
             return 1 == await self.conn.fetchval("""
                 SELECT COUNT(*) FROM users WHERE email = $1 AND secret_number = $2
             """, email, secret_number)
-    
-    async def get_elections_ids(self, email: str):
+
+    async def get_elections_ids(self, email: str) -> tuple[dict, ...]:
         async with self.conn.transaction():
-            managed = await self.conn.fetch("""
-                SELECT election_id, name, COUNT(email) FILTER(WHERE vote_state = 1) AS voted, (running_election.vote_vector IS NOT NULL) AS is_running
-                FROM election_votes JOIN elections USING (election_id)
+            elections = await self.conn.fetch("""
+                WITH election_stats AS (
+                    SELECT election_id, COUNT(email) AS voters,
+                        COUNT(email) FILTER(WHERE vote_state != 2147483647) AS voted,
+                        (1 = COUNT(email) FILTER(WHERE email = $1)) AS can_vote
+                    FROM election_votes
+                    GROUP BY election_id
+                )
+                SELECT name, election_stats.*, (manager_email = $1) AS is_manager,
+                    (running_election.vote_vector IS NOT NULL) AS is_running,
+                    (finished_election.winners IS NOT NULL) AS is_finished
+                FROM elections JOIN election_stats USING (election_id)
                 LEFT JOIN running_election USING (election_id)
-                WHERE manager_email = $1
-                GROUP BY election_id, name, running_election.vote_vector
+                LEFT JOIN finished_election USING (election_id)
             """, email)
-            voting = await self.conn.fetch("""
-                SELECT name, election_id, (vote_state = 1) AS have_voted, (running_election.vote_vector IS NOT NULL) AS is_running
-                FROM election_votes JOIN elections USING (election_id)
-                LEFT JOIN running_election USING (election_id)
-                WHERE email = $1
-            """, email)
-            def output1(record):
-                return {k: str(record[k]) for k in ('name', 'election_id', 'voted', 'is_running')}
-            def output2(record):
-                return {k: str(record[k]) for k in ('name', 'election_id', 'have_voted', 'is_running')}
-            return tuple(map(output1, managed)), tuple(map(output2, voting))
-    
+            def output(record):
+                return {k: str(record[k]) for k in ('name', 'election_id', 'voters', 'voted', 'can_vote', 'is_running', 'is_manager', 'is_finished')}
+            return tuple(map(output, elections))
+
     async def create_election(self, election: mytypes.Election, voters: tuple[str, ...]) -> bool:
         try:
             async with self.conn.transaction():
@@ -68,7 +68,7 @@ class DBconn:
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 """, election.election_id, election.manager_email, election.election_name, election.selected_election_type.name, election.candidates, election.winner_count,
                     election.p, election.L)
-                
+
                 await self.conn.execute("""
                     INSERT INTO election_votes(election_id, email)
                     SELECT $1, * FROM UNNEST($2::text[])
@@ -76,7 +76,7 @@ class DBconn:
             return True
         except asyncpg.UniqueViolationError:
             return False
-    
+
     async def get_election(self, election_id: uuid.UUID) -> mytypes.Election:
         async with self.conn.transaction():
             values = await self.conn.fetchrow("""
@@ -89,8 +89,7 @@ class DBconn:
             return mytypes.Election(election_id, values['name'], values['manager_email'],
                                     mytypes.ElectionType[values['selected_election_type']],
                                     values['candidates'], values['winner_count'], values['p'], values['l'])
-            return False
-    
+
     async def get_election_extra_data(self, election_id: uuid.UUID) -> Tuple[str, Tuple[str, ...]]:
         async with self.conn.transaction():
             values = await self.conn.fetchrow("""
@@ -103,7 +102,7 @@ class DBconn:
             if values is None:
                 raise ValueError()
             return (values['manager_name'], tuple(values['voters']))
-    
+
     async def start_election(self, election: mytypes.Election) -> bool:
         try:
             async with self.conn.transaction():
@@ -114,7 +113,7 @@ class DBconn:
             return True
         except asyncpg.UniqueViolationError:
             return False
-    
+
     async def stop_election(self, election: mytypes.Election) -> Optional[Tuple[int, ...]]:
         async with self.conn.transaction():
             vote_vector = await self.conn.fetchval("""
@@ -129,12 +128,14 @@ class DBconn:
                 WHERE election_id = $1
             """, election.election_id)
             return tuple(vote_vector)
-    
-    async def delete_election(self, election: mytypes.Election):
+
+    async def finish_election(self, election: mytypes.Election, winners: Tuple[str, ...]):
         async with self.conn.transaction():
-            for table in ('election_votes', 'elections'):
-                await self.conn.execute(f"DELETE FROM {table} WHERE election_id = $1", election.election_id)
-    
+            await self.conn.execute("""
+                INSERT INTO finished_election(election_id, winners)
+                VALUES ($1, $2)
+            """, election.election_id, winners)
+
     async def vote_status(self, election_id: uuid.UUID, email: str) -> int:
         async with self.conn.transaction():
             status = await self.conn.fetchval("""
@@ -169,7 +170,7 @@ class DBconn:
             try:
                 logger.info('connecting as super user')
                 sys_conn = await asyncpg.connect(
-                    host='db', 
+                    host='db',
                     database='template1',
                     user='postgres',
                     password='password',
@@ -191,7 +192,7 @@ class DBconn:
 
                 with Path(__file__).with_name('init.sql').open('r') as f:
                     INIT_DB_SQL = f.read()
-                
+
                 await conn.execute(INIT_DB_SQL)
             finally:
                 await conn.close()

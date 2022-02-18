@@ -28,7 +28,7 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
         try:
             message = json.loads(await websocket.recv())
             if path == "/register":
-                res = await db.register(message['email'], message['name'], 42)
+                res = await db.register(message['email'], message['name'], get_user_id(message['email']))
                 logger.info('register %s <%s>: db result is %s', message['name'], message['email'], 'successful' if res else 'unsuccessful')
                 if res and tallier_id == 0:
                     from mail import register_email
@@ -43,23 +43,16 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
             elif path == "/elections":
                 if not await db.login(message['email'], int(message['number'])):
                     return await websocket.close(code=1008)
-                managed, voting = await db.get_elections_ids(message['email'])
-                await websocket.send(json.dumps({
-                    'managed': managed,
-                    'voting': voting,
-                }))
+                logger.info('user <%s>: Collected all elections', message['email'])
+                elections = await db.get_elections_ids(message['email'])
+                await websocket.send(json.dumps(elections))
                 return await websocket.close(code=1000)
 
             elif path == "/election":
                 if not await db.login(message['email'], int(message['number'])):
                     return await websocket.close(code=1008)
                 election = await db.get_election(UUID(message['id']))
-                await websocket.send(json.dumps({
-                    "rule": election.selected_election_type.value - 1,
-                    "candidates": election.candidates,
-                    "p": election.p,
-                    "L": election.L,
-                }))
+                await websocket.send(json.dumps(election._asdict() | {'election_id': str(election.election_id)}))
                 return await websocket.close(code=1000)
 
             elif path == "/elections/create":
@@ -68,6 +61,8 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                     return await websocket.close(code=1008)
                 election = Election(UUID(message['id']), message['name'], message['email'], ElectionType(message['rule']), message['candidates'],
                                     message['K'], message['p'], message['L'])
+                if len(election.candidates) == 0 or len(message['voters']) == 0:
+                    return await websocket.close(code=4000)
                 res = await db.create_election(election, tuple(set(message['voters'])))
                 return await websocket.close(code=(1000 if res else 1008))
 
@@ -99,7 +94,7 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                             from mail import stop_election
                             manager_name, voters = await db.get_election_extra_data(election.election_id)
                             stop_election(manager_name, election, voters, winners)
-                            await db.delete_election(election)
+                            await db.finish_election(election, winners)
                     asyncio.ensure_future(calc_winners())
                     return await websocket.close(code=1000)
                 else:

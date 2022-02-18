@@ -15,64 +15,61 @@
       }
     };
     sock.onmessage = (event) => {
-      const obj = JSON.parse(event.data);
+      const elections = JSON.parse(event.data);
 
-      const build_label = (text) => {
-        const cell = document.createElement('td');
-        cell.appendChild(document.createTextNode(text));
-        return cell;
-      };
-      const build_button = (label, func) => {
-        const cell = document.createElement('td');
+      const make_label = (text) => document.createTextNode(text);
+      const make_btn = (label, func) => {
         const btn = document.createElement('input');
         btn.type = 'button';
         btn.onclick = func;
         btn.value = label;
-        cell.appendChild(btn);
+        return btn;
+      };
+      const make_cell = (...elements) => {
+        const cell = document.createElement('td');
+        elements.forEach(elem => cell.appendChild(elem));
         return cell;
       };
 
-      const managed = document.getElementById('managed');
-      obj.managed.forEach(election => {
+      const table = document.getElementById("elections");
+      console.log(elections);
+      elections.forEach(election => {
         const row = document.createElement('tr');
-        row.appendChild(build_label(election.name));
-        row.appendChild(build_label(election.election_id.split('-')[0]));
-        if (election.is_running == "False") {
-          row.appendChild(build_button('Start', (event) => communicate(
-            "elections/start", { ...cookies_login(), id: election.election_id }, (event) => {
-              alert('Election Started.\nEmails have been sent to all participants.');
-              location.reload();
-            }, (event) => {
-              alert('Something failed.');
-            })));
+        row.appendChild(make_cell(make_label(election.name)));
+        row.appendChild(make_cell(make_label(election.election_id.split('-')[0])));
+        if (election.is_finished == "True") {
+          row.appendChild(make_cell(make_label("Finished")));
+        } else if (election.is_running == "True") {
+          row.appendChild(make_cell(make_label(`Running ${election.voted}/${election.voters} Votes`)));
         } else {
-          row.appendChild(build_button('Stop', (event) => communicate(
-            "elections/stop", { ...cookies_login(), id: election.election_id }, (event) => {
-              alert('Election closed.\nEmails with results have been sent to all participants.');
-              location.reload();
-            }, (event) => {
-              alert('Something failed.');
-            })));
-          row.appendChild(build_label(`${election.voted} have voted`));
+          row.appendChild(make_cell(make_label("Waiting to start")));
         }
-        managed.appendChild(row);
-      });
 
-      const voting = document.getElementById('voting');
-      obj.voting.forEach(election => {
-        const row = document.createElement('tr');
-        row.appendChild(build_label(election.name));
-        row.appendChild(build_label(election.election_id.split('-')[0]));
-        if (election.is_running == "False") {
-          row.appendChild(build_label("Not running"));
-        } else if (election.have_voted == "False") {
-          row.appendChild(build_button('Vote', (event) => {
-            location.href = `election/vote?id=${election.election_id}`;
-          }));
-        } else {
-          row.appendChild(build_label("Already voted"));
+        if (election.is_finished == "False") {
+          row.appendChild(make_cell(
+            ...(election.is_manager == "False" ? [] : [
+              (election.is_running == "False") ? make_btn("Start", (event) => communicate(
+              "elections/start", { ...cookies_login(), id: election.election_id }, (event) => {
+                alert('Election Started.\nEmails have been sent to all participants.');
+                location.reload();
+              }, (event) => {
+                alert('Something failed.');
+              })) : make_btn("Stop", (event) => communicate(
+              "elections/stop", { ...cookies_login(), id: election.election_id }, (event) => {
+                alert('Election closed.\nEmails with results have been sent to all participants.');
+                location.reload();
+              }, (event) => {
+                alert('Something failed.');
+              }))
+            ]),
+            ...(election.can_vote == "False" || election.is_running == "False" ? [] : [
+              make_btn("Vote", (event) => {
+                location.href = `election/vote?id=${election.election_id}`;
+              })
+            ])
+          ));
         }
-        voting.appendChild(row);
+        table.appendChild(row);
       });
     };
   }
@@ -82,18 +79,9 @@
 {% block content %}
 <form id="form">
   <a href="election/create">Create Election</a>
-  <h3>Managed by me</h3>
+  <h3>Elections</h3>
   <table border="1">
-    <tbody id="managed">
-      <tr>
-        <th>Name</th>
-        <th>UUID</th>
-      </tr>
-    </tbody>
-  </table>
-  <h3>Can Vote</h3>
-  <table border="1">
-    <tbody id="voting">
+    <tbody id="elections">
       <tr>
         <th>Name</th>
         <th>UUID</th>
