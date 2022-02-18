@@ -4,7 +4,6 @@ import os
 
 app = flask.Flask(__name__)
 
-print('Hello', os.environ)
 TALLIERS = os.getenv('TALLIERS_EXTERNAL').split('|')
 TALLIERS = ['ws://' + x for x in TALLIERS]
 CSP = f"connect-src 'self' {' '.join(TALLIERS)};"
