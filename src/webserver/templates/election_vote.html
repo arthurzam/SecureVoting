@@ -185,19 +185,6 @@
     const election_id = url.searchParams.get("id");
 
     let OKs = 0;
-    const onclose = (event) => {
-      if (OKs < 0) {
-      } else if (event.code === 1000) {
-        OKs += 1;
-        if (OKs == talliers.length) {
-          alert('Ballot accepted');
-          location.href = '../elections';
-        }
-      } else {
-        OKs = -1;
-        alert(`Someone said no ${event.code}`);
-      }
-    };
     talliers.forEach((tallier, idx) => {
       let sock = new WebSocket(`${tallier}/elections/vote`);
       sock.onopen = (event) => sock.send(JSON.stringify({
@@ -206,7 +193,30 @@
         not_abstain: not_abstain,
         votes: shares.map(x => x[idx])
       }));
+      sock.onerror = (event) => {
+        OKs = -1;
+        dot_bad(idx, '#888');
+        if (OKs < 0) {
+          on_fail(event);
+        }
+      };
       sock.onclose = onclose;
+      sock.onclose = (event) => {
+        if (OKs < 0) {
+          dot_bad(idx, '#F00');
+        } else if (event.code === (not_abstain == 1 ? 1000 : 4000)) {
+          OKs += 1;
+          if (OKs == talliers.length) {
+            update_cookie();
+            alert('Ballot accepted');
+            location.href = '../elections';
+          }
+        } else {
+          OKs = -1;
+          dot_bad(idx, '#F00');
+          alert(`Someone said no ${event.code}`);
+        }
+      };
     });
   }
 </script>

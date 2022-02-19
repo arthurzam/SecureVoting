@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+
+{% block title %}Create Election{% endblock %}
+
+{% block head %}
+<script>
+  login_required();
+
+  function load() {
+    const election_id = new URL(window.location.href).searchParams.get("id");
+    if (election_id == null) {
+      location.href = '../elections';
+    } else {
+      let sock = new WebSocket(`${talliers[0]}/election`);
+      sock.onopen = (event) => sock.send(JSON.stringify({ ...cookies_login(), id: election_id }));
+      sock.onclose = (event) => {
+        if (event.code !== 1000) {
+          alert("something failed");
+          location.href = '../elections';
+        }
+      };
+      sock.onmessage = (event) => {
+        const election = JSON.parse(event.data);
+        console.log(election);
+        document.getElementById("id").value = election_id;
+        document.getElementById("name").value = election.election_name;
+        document.getElementById("email").value = election.manager_email;
+        document.getElementById("rule").value = ["plurality", "range", "approval", "veto", "borda"][election.selected_election_type - 1];
+        document.getElementById("candidates").value = election.candidates.join('\n');
+      };
+    }
+  }
+</script>
+{% endblock %}
+
+{% block content %}
+<form id="form">
+  <div>
+    <label for="name">Election ID:</label><br />
+    <input type="text" id="id" style="width: 180px;" disabled /><br />
+    <label for="name">Manager Email:</label><br />
+    <input type="text" id="email" style="width: 180px;" disabled /><br />
+    <label for="name">Election Name:</label><br />
+    <input type="text" id="name" style="width: 180px;" disabled /><br />
+  </div>
+
+  <div>
+    <label for="name">Selected Rule:</label><br />
+    <input type="text" id="rule" style="width: 180px;" disabled /><br />
+    <!-- <label for="name">Voters Count:</label><br />
+    <input type="number" id="voters" style="width: 180px;" disabled /><br />
+    <label for="name">Already Voted:</label><br />
+    <input type="number" id="voted" style="width: 180px;" disabled /><br /> -->
+  </div>
+
+  <div>
+    <label for="candidates">Candidates:</label><br />
+    <textarea id="candidates" style="width: 180px; height: 6em;" disabled ></textarea>
+  </div>
+</form>
+<script>
+  load();
+</script>
+{% endblock %}

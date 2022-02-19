@@ -1,25 +1,35 @@
-from typing import Dict
-from uuid import UUID
-import websockets as ws
 import contextlib
+from typing import Dict, Optional, Tuple
+import websockets as ws
+from uuid import UUID
 import logging
 import asyncio
 import json
 
 from db import DBconn
-from mpc_manager import TallierManager
-from mpc import MpcValidation
+from mpc_manager import TallierManager, Tallier
+from mpc import MpcValidation, MpcWinner
 from mytypes import Election, ElectionType
 
 
 running_elections: Dict[UUID, MpcValidation] = {}
+computation_mpc: Optional[MpcWinner] = None
 
 def get_user_id(email: str):
     from hashlib import sha1
     return int(sha1(email.encode("utf-8")).hexdigest(), 16) % 2147483647
 
 
+def clean_user_array(arr: Tuple[str, ...]) -> Tuple[str, ...]:
+    return tuple(k for k in dict.fromkeys(map(str.strip, arr)) if k)
+
+
 def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_talliers):
+    async def make_computation_mpc() -> MpcWinner:
+        computation_election = Election(UUID(bytes=b'\0'*16), "__computation__", "", ElectionType.approval, [], 1, 2147483647, 1)
+        talliers = await manager.start_clique(computation_election.election_id, wanted_talliers, tallier_id, Tallier)
+        return MpcWinner(computation_election, talliers)
+
     logging.getLogger('websockets.server').setLevel(logging.WARN)
     logger = logging.getLogger('websocket')
     logger.setLevel(logging.INFO)
@@ -58,11 +68,13 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
             elif path == "/elections/create":
                 if not await db.login(message['email'], int(message['number'])):
                     return await websocket.close(code=1008)
-                election = Election(UUID(message['id']), message['name'], message['email'], ElectionType(message['rule']), message['candidates'],
+                candidates = clean_user_array(message['candidates'])
+                voters = clean_user_array(message['voters'])
+                election = Election(UUID(message['id']), message['name'], message['email'], ElectionType(message['rule']), candidates,
                                     message['K'], message['p'], message['L'])
                 if len(election.candidates) == 0 or len(message['voters']) == 0:
                     return await websocket.close(code=4000)
-                res = await db.create_election(election, tuple(set(message['voters'])))
+                res = await db.create_election(election, voters)
                 return await websocket.close(code=(1000 if res else 1008))
 
             elif path == "/elections/start":
@@ -100,6 +112,10 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                     return await websocket.close(code=1008)
 
             elif path == "/elections/vote":
+                global computation_mpc
+                if computation_mpc is None:
+                    computation_mpc = await make_computation_mpc()
+
                 if not await db.login(message['email'], int(message['number'])):
                     return await websocket.close(code=1008)
                 election = await db.get_election(UUID(message['id']))
@@ -110,19 +126,21 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                 votes = tuple(message['votes'])
                 if len(votes) != len(election.candidates):
                     return await websocket.close(code=1007)
-                not_abstain = message['not_abstain']
+                not_abstain = int(message['not_abstain'])
                 db_status = await db.vote_status(election.election_id, email)
 
-                if int(not_abstain) == 0:
+                if not_abstain == 0:
                     logger.info("Abstain for %s in election %s", email, election.election_id)
-                    return await websocket.close(code=1000)
-
-                if db_status != 0 or not await running_elections[election.election_id].validate(get_user_id(email), votes):
+                msg_id = get_user_id(email)
+                validate = await running_elections[election.election_id].validate(msg_id, votes)
+                if not validate:
                     logger.info("Invalid vote for %s in election %s", email, election.election_id)
-                    return await websocket.close(code=1007)
-
-                await db.vote(election, votes, email, 1)
-                return await websocket.close(code=1000)
+                db_status = int(validate) * await computation_mpc.multiply(msg_id, 1 - db_status, not_abstain)
+                res = await computation_mpc.resolve(msg_id, db_status)
+                logger.info("mul of %s * %d", votes, db_status)
+                new_votes = await running_elections[election.election_id].multiply(msg_id, votes, tuple(db_status for _ in votes))
+                await db.vote(election, new_votes, email, db_status)
+                return await websocket.close(code=(1000 if res else 4000))
 
         except json.JSONDecodeError:
             logger.info('Badly formatted JSON message for %s', path)

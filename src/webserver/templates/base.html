@@ -20,6 +20,13 @@
         }
       }
 
+      function update_cookie() {
+        const vals = cookies_login();
+
+        document.cookie = `email=${vals.email}; SameSite=Lax; max-age=1200`;
+        document.cookie = `number=${vals.number}; SameSite=Lax; max-age=1200`;
+      }
+
       function communicate(path, content, on_success, on_fail) {
         let OKs = 0;
         talliers.forEach((tallier, idx) => {
@@ -50,7 +57,7 @@
       }
 
       function dot_bad(idx, color) {
-        document.getElementById(`dor${idx}`).style.backgroundColor = color;
+        document.getElementById(`dot${idx}`).style.backgroundColor = color;
       }
     </script>
     <style>

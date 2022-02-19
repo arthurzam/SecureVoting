@@ -18,6 +18,12 @@
       const elections = JSON.parse(event.data);
 
       const make_label = (text) => document.createTextNode(text);
+      const make_link = (text, target) => {
+        const a = document.createElement('a');
+        a.href = target;
+        a.appendChild(document.createTextNode(text));
+        return a;
+      };
       const make_btn = (label, func) => {
         const btn = document.createElement('input');
         btn.type = 'button';
@@ -36,7 +42,7 @@
       elections.forEach(election => {
         const row = document.createElement('tr');
         row.appendChild(make_cell(make_label(election.name)));
-        row.appendChild(make_cell(make_label(election.election_id.split('-')[0])));
+        row.appendChild(make_cell(make_link(election.election_id.split('-')[0], `election/view?id=${election.election_id}`)));
         if (election.is_finished == "True") {
           row.appendChild(make_cell(make_label("Finished")));
         } else if (election.is_running == "True") {
@@ -50,12 +56,14 @@
             ...(election.is_manager == "False" ? [] : [
               (election.is_running == "False") ? make_btn("Start", (event) => communicate(
               "elections/start", { ...cookies_login(), id: election.election_id }, (event) => {
+                update_cookie();
                 alert('Election Started.\nEmails have been sent to all participants.');
                 location.reload();
               }, (event) => {
                 alert('Something failed.');
               })) : make_btn("Stop", (event) => communicate(
               "elections/stop", { ...cookies_login(), id: election.election_id }, (event) => {
+                update_cookie();
                 alert('Election closed.\nEmails with results have been sent to all participants.');
                 location.reload();
               }, (event) => {
@@ -64,6 +72,7 @@
             ]),
             ...(election.can_vote == "False" || election.is_running == "False" ? [] : [
               make_btn("Vote", (event) => {
+                update_cookie();
                 location.href = `election/vote?id=${election.election_id}`;
               })
             ])

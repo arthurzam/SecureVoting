@@ -47,7 +47,7 @@ class MpcBase:
         self.election = election
         self.D = len(talliers)
         self.p = election.p
-        
+
         self.collectors = tuple(asyncio.create_task(tallier.receive_loop()) for tallier in talliers if tallier is not None)
         self.talliers = talliers
 
@@ -72,7 +72,7 @@ class MpcWinner(MpcBase):
             if not tallier:
                 return value
             await tallier.write(msgid, (value, ))
-            return await tallier.read(msgid)[0]
+            return (await tallier.read(msgid))[0]
         return tuple(await asyncio.gather(*map(single_exchange, self.talliers, values)))
 
     async def multiply(self, msgid: int, a: int, b: int) -> int:
@@ -173,7 +173,7 @@ class MpcWinner(MpcBase):
         c = await self.multiply(msgid, x, y)
         d = (x + y - c) % self.p
         return (await self.multiply(msgid, w, (d - c) % self.p) + 1 - d) % self.p
-    
+
     async def __max_index(self, msgid: int, a: Tuple[Tuple[int, int], ...], b: Tuple[Tuple[int, int], ...]) -> Tuple[Tuple[int, int], ...]:
         c = await self.less(msgid, a[1], b[1])
         a = await asyncio.gather(self.multiply(msgid, c, b[1]),

@@ -20,13 +20,13 @@ CREATE TABLE elections (
 CREATE TABLE election_votes (
     election_id uuid REFERENCES elections(election_id),
     email text NOT NULL,
-    vote_state int NOT NULL DEFAULT 0,
+    vote_state bigint NOT NULL DEFAULT 0,
     PRIMARY KEY (election_id, email)
 );
 
 CREATE TABLE running_election (
     election_id uuid REFERENCES elections(election_id) PRIMARY KEY,
-    vote_vector int[]
+    vote_vector bigint[]
 );
 
 CREATE TABLE finished_election (
@@ -34,7 +34,7 @@ CREATE TABLE finished_election (
     winners text[]
 );
 
-CREATE OR REPLACE FUNCTION sum_int_arrays(int[], int[], int) RETURNS int[]
+CREATE OR REPLACE FUNCTION sum_int_arrays(bigint[], bigint[], bigint) RETURNS int[]
 LANGUAGE SQL immutable AS $$
     SELECT ARRAY_AGG((COALESCE(a, 0) + b) % $3)
     FROM UNNEST($1, $2) AS u(a, b)

@@ -34,6 +34,10 @@ def login():
 def election_create():
     return flask.render_template('election_create.html')
 
+@app.route('/election/view')
+def election_view():
+    return flask.render_template('election_view.html')
+
 @app.route('/election/vote')
 def election_vote():
     return flask.render_template('election_vote.html')

@@ -57,6 +57,7 @@
       rule: parseInt(document.getElementById("form").elements["rule"].value),
       voters: [...document.getElementById("voters").options].map(o => o.text)
     }, (event) => {
+      update_cookie();
       alert('Election Created Successfully');
       location.href = '../elections';
     }, (event) => alert('Creation failed'));
