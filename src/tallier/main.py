@@ -18,6 +18,7 @@ wanted_talliers = [TallierAddress(ip, int(port)) for ip, port in (s.split(':') f
 async def main(tallier_id: int):
     secrets_dir = Path("/run/secrets")
     async with DBconn(user=f'avote{tallier_id}', database=f'avote{tallier_id}') as db:
+        await db.stop_all_elections()
         async with TallierManager(secrets_dir / 'certfile.pem', secrets_dir / 'avote_ca.crt') as manager:
             async with websock_server(db, manager, tallier_id, wanted_talliers):
                 await cancel

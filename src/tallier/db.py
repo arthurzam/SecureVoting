@@ -44,7 +44,7 @@ class DBconn:
             elections = await self.conn.fetch("""
                 WITH election_stats AS (
                     SELECT election_id, COUNT(email) AS voters,
-                        COUNT(email) FILTER(WHERE vote_state != 2147483647) AS voted,
+                        COUNT(email) FILTER(WHERE vote_state != 2147483648) AS voted,
                         (1 = COUNT(email) FILTER(WHERE email = $1)) AS can_vote
                     FROM election_votes
                     GROUP BY election_id
@@ -70,9 +70,9 @@ class DBconn:
                     election.p, election.L)
 
                 await self.conn.execute("""
-                    INSERT INTO election_votes(election_id, email)
-                    SELECT $1, * FROM UNNEST($2::text[])
-                """, election.election_id, voters)
+                    INSERT INTO election_votes(election_id, email, vote_state)
+                    SELECT $1, *, $3 FROM UNNEST($2::text[])
+                """, election.election_id, voters, election.p + 1)
             return True
         except asyncpg.UniqueViolationError:
             return False
@@ -90,7 +90,23 @@ class DBconn:
                                     mytypes.ElectionType[values['selected_election_type']],
                                     values['candidates'], values['winner_count'], values['p'], values['l'])
 
-    async def get_election_extra_data(self, election_id: uuid.UUID) -> Tuple[str, Tuple[str, ...]]:
+    async def get_election_extra(self, election_id: uuid.UUID) -> mytypes.Election:
+        async with self.conn.transaction():
+            values = await self.conn.fetchrow("""
+                SELECT name, manager_email, selected_election_type AS rule, candidates, winner_count, p, l,
+                    ARRAY_AGG(election_votes.email) AS voters,
+                    COUNT(election_votes.email) FILTER(WHERE election_votes.vote_state != 2147483648) AS voted
+                FROM elections JOIN election_votes USING (election_id)
+                WHERE election_id = $1
+                GROUP BY election_id
+            """, election_id)
+            if values is None:
+                raise ValueError()
+            return {
+                k: values[k] for k in ("name", "manager_email", "rule", "candidates", "winner_count", "p", "l", "voters", "voted")
+            } | {"election_id": str(election_id)}
+
+    async def get_election_emails(self, election_id: uuid.UUID) -> Tuple[str, Tuple[str, ...]]:
         async with self.conn.transaction():
             values = await self.conn.fetchrow("""
                 SELECT users.name AS manager_name, ARRAY_AGG(election_votes.email) AS voters
@@ -128,6 +144,11 @@ class DBconn:
                 WHERE election_id = $1
             """, election.election_id)
             return tuple(vote_vector)
+
+    async def stop_all_elections(self):
+        async with self.conn.transaction():
+            await self.conn.execute("DELETE FROM running_election")
+            logger.info("Stopped all elections")
 
     async def finish_election(self, election: mytypes.Election, winners: Tuple[str, ...]):
         async with self.conn.transaction():

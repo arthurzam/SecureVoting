@@ -38,11 +38,12 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
         try:
             message = json.loads(await websocket.recv())
             if path == "/register":
-                res = await db.register(message['email'], message['name'], get_user_id(message['email']))
+                code = get_user_id(message['email'])
+                res = await db.register(message['email'], message['name'], code)
                 logger.info('register %s <%s>: db result is %s', message['name'], message['email'], 'successful' if res else 'unsuccessful')
                 if res and tallier_id == 0:
                     from mail import register_email
-                    register_email(message['email'], message['name'], 42)
+                    register_email(message['email'], message['name'], code)
                 return await websocket.close(code=(1000 if res else 1008))
 
             elif path == "/login":
@@ -63,6 +64,12 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                     return await websocket.close(code=1008)
                 election = await db.get_election(UUID(message['id']))
                 await websocket.send(json.dumps(election._asdict() | {'election_id': str(election.election_id)}))
+                return await websocket.close(code=1000)
+
+            elif path == "/election/extra":
+                if not await db.login(message['email'], int(message['number'])):
+                    return await websocket.close(code=1008)
+                await websocket.send(json.dumps(await db.get_election_extra(UUID(message['id']))))
                 return await websocket.close(code=1000)
 
             elif path == "/elections/create":
@@ -86,7 +93,7 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                 running_elections[election.election_id] = await manager.start_election_voting(election, wanted_talliers, tallier_id)
                 if tallier_id == 0:
                     from mail import start_election
-                    manager_name, voters = await db.get_election_extra_data(election.election_id)
+                    manager_name, voters = await db.get_election_emails(election.election_id)
                     start_election(manager_name, election, voters)
                 return await websocket.close(code=1000)
 
@@ -103,7 +110,7 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                         winners = await manager.calc_winners(election, wanted_talliers, tallier_id, vote_vector)
                         if tallier_id == 0:
                             from mail import stop_election
-                            manager_name, voters = await db.get_election_extra_data(election.election_id)
+                            manager_name, voters = await db.get_election_emails(election.election_id)
                             stop_election(manager_name, election, voters, winners)
                             await db.finish_election(election, winners)
                     asyncio.ensure_future(calc_winners())
@@ -135,11 +142,12 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                 validate = await running_elections[election.election_id].validate(msg_id, votes)
                 if not validate:
                     logger.info("Invalid vote for %s in election %s", email, election.election_id)
-                db_status = int(validate) * await computation_mpc.multiply(msg_id, 1 - db_status, not_abstain)
-                res = await computation_mpc.resolve(msg_id, db_status)
-                logger.info("mul of %s * %d", votes, db_status)
-                new_votes = await running_elections[election.election_id].multiply(msg_id, votes, tuple(db_status for _ in votes))
-                await db.vote(election, new_votes, email, db_status)
+                votes_scale = int(validate) * await computation_mpc.multiply(msg_id, db_status, not_abstain)
+                res = await computation_mpc.resolve(msg_id, votes_scale)
+                new_votes = await running_elections[election.election_id].multiply(msg_id, votes, tuple(votes_scale for _ in votes))
+                new_db_status = await computation_mpc.multiply(msg_id, db_status, 1 - votes_scale)
+                logger.warning("Current state: abstain %d, db-status %d -> %d, validate %d", not_abstain, db_status, new_db_status, int(validate))
+                await db.vote(election, new_votes, email, new_db_status)
                 return await websocket.close(code=(1000 if res else 4000))
 
         except json.JSONDecodeError:

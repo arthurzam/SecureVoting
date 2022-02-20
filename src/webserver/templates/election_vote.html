@@ -204,17 +204,31 @@
       sock.onclose = (event) => {
         if (OKs < 0) {
           dot_bad(idx, '#F00');
-        } else if (event.code === (not_abstain == 1 ? 1000 : 4000)) {
-          OKs += 1;
-          if (OKs == talliers.length) {
-            update_cookie();
-            alert('Ballot accepted');
-            location.href = '../elections';
+        } else if (not_abstain == 1) {
+          if (event.code == 1000) {
+            OKs += 1;
+            if (OKs == talliers.length) {
+              update_cookie();
+              alert('Ballot accepted');
+              location.href = '../elections';
+            }
+          } else {
+            OKs = -1;
+            dot_bad(idx, '#F00');
+            alert(`Validation failed with code: ${event.code}`);
           }
         } else {
-          OKs = -1;
-          dot_bad(idx, '#F00');
-          alert(`Someone said no ${event.code}`);
+          if (event.code == 4000) {
+            OKs += 1;
+            if (OKs == talliers.length) {
+              update_cookie();
+              alert('Abstain passed');
+            }
+          } else {
+            OKs = -1;
+            dot_bad(idx, '#F00');
+            alert(`Abstain failed with code: ${event.code}`);
+          }
         }
       };
     });
