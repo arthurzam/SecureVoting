@@ -4,7 +4,7 @@ CREATE TABLE users (
     secret_number bigint NOT NULL
 );
 
-CREATE TYPE election_type AS ENUM ('plurality', 'range', 'approval', 'veto', 'borda');
+CREATE TYPE election_type AS ENUM ('plurality', 'range', 'approval', 'veto', 'borda', 'copeland', 'maximin');
 
 CREATE TABLE elections (
     election_id uuid PRIMARY KEY,

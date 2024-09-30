@@ -1,12 +1,12 @@
 import flask
 import os
+from urllib.parse import urlparse
 
 
 app = flask.Flask(__name__)
 
 TALLIERS = os.getenv('TALLIERS_EXTERNAL').split('|')
-TALLIERS = ['ws://' + x for x in TALLIERS]
-CSP = f"connect-src 'self' {' '.join(TALLIERS)};"
+CSP = f"connect-src 'self' {' '.join(f'{u.scheme}://{u.netloc}' for u in map(urlparse, TALLIERS))};"
 
 @app.context_processor
 def inject_user():

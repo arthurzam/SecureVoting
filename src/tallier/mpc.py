@@ -75,9 +75,42 @@ class MpcWinner(MpcBase):
             return (await tallier.read(msgid))[0]
         return tuple(await asyncio.gather(*map(single_exchange, self.talliers, values)))
 
-    async def multiply(self, msgid: int, a: int, b: int) -> int:
+    async def bgw_multiply(self, msgid: int, a: int, b: int) -> int:
         results = await self.exchange(msgid, self.gen_shamir((a * b) % self.p))
         return sum(map(operator.mul, self.vandermond_first_row, results)) % self.p
+
+    async def rnd_multiply(self, msgid: int, a: int, b: int) -> int:
+        # TODO: pregenerate random shares in D and 2D-1
+        r_i = randint(0, self.p - 1)
+        d = (self.D + 1) // 2
+        r_i_d = utils.clean_gen_shamir(r_i, self.D, d, self.p) # r_i in D shares
+        r_i_2d = utils.clean_gen_shamir(r_i, self.D, 2 * d - 1, self.p) # r_i in 2D-1 shares
+
+        r_d = sum(await self.exchange(msgid, r_i_d)) % self.p
+        r_2d = sum(await self.exchange(msgid, r_i_2d)) % self.p
+
+        w_d = (a * b + r_2d) % self.p # in 2D-1 shares
+
+        if T := self.talliers[msgid % len(self.talliers)]: # not selected computing tallier
+            await T.write(msgid, (w_d, ))
+            w_d = (await T.read(msgid))[0] # public value
+        else: # computing tallier
+            async def get_value(tallier: Optional[TallierConn]) -> int:
+                if tallier is None:
+                    return w_d
+                return (await tallier.read(msgid))[0]
+
+            shares = tuple(await asyncio.gather(*map(get_value, self.talliers)))
+            w_d = utils.resolve(shares, self.p) # public value
+
+            async def send_value(tallier: Optional[TallierConn]):
+                if tallier is not None:
+                    await tallier.write(msgid, (w_d, ))
+            await asyncio.gather(*map(send_value, self.talliers))
+
+        return (w_d - r_d) % self.p # in D shares
+
+    multiply = rnd_multiply
 
     async def resolve(self, msgid: int, a: int) -> int:
         results = await self.exchange(msgid, tuple(a for _ in range(self.D)))
@@ -182,6 +215,16 @@ class MpcWinner(MpcBase):
                                     self.multiply(msgid + 3, (1 - c) % self.p, a[0]))
         return (a[1] + a[3]) % self.p, (a[0] + a[2]) % self.p
 
+    async def is_zero(self, msgid: int, a: int) -> int:
+        n = self.p - 1
+        result = 1
+        while n > 0: # result = a ** (p - 1) mod p
+            if n % 2 == 1:
+                result = await self.multiply(msgid, result, a)
+            result = await self.multiply(msgid, result, result)
+            n = n // 2
+        return (self.p + 1 - result) % self.p # 1 - result
+
     async def max(self, msgbase: int, votes: Sequence[int]) -> int:
         if len(votes) == 1:
             return 0
@@ -190,11 +233,34 @@ class MpcWinner(MpcBase):
             votes_idx = await asyncio.gather(*(map(self.__max_index, count(msgbase, 3 * self.block_size), votes_idx[::2], votes_idx[1::2]))) + votes_idx[len(votes_idx)^1:]
         return await self.resolve(msgbase, votes_idx[0][0])
 
+    async def is_positive(self, msgid: int, a: int) -> int:
+        val = (2 * self.p - 2 * a) % self.p # -2a mod p
+        return await self.is_odd(msgid, val)
+
+    async def copeland_score(self, msgbase: int, m: int, M: int, s: int, t: int, votes: tuple[int]) -> int:
+        def gamma(m1: int, m2: int):
+            if m1 == m2:
+                return 0
+            return votes[m2 - m1 - 1 + m1 * M - m1 * (m1 + 1) // 2]
+
+        positives = []
+        positives.extend((gamma(m, m2) for m2 in range(m+1, M)))
+        positives.extend((self.p - gamma(m2, m) for m2 in range(0, m)))
+        zeros = []
+        zeros.extend((gamma(m, m2) for m2 in range(m+1, M)))
+        zeros.extend((gamma(m2, m) for m2 in range(0, m)))
+        return t * sum(await asyncio.gather(*map(self.is_positive, count(msgbase, self.block_size), positives))) + \
+               s * sum(await asyncio.gather(*map(self.is_zero, count(msgbase, 1), zeros)))
+
 def _transpose(values: Tuple[Tuple[int, ...], ...]) -> Tuple[Tuple[int, ...], ...]:
     return tuple(map(tuple, zip(*values)))
 
 class MpcValidation(MpcBase):
     async def exchange(self, msgid: int, values: Tuple[Tuple[int, ...], ...]) -> Tuple[Tuple[int, ...], ...]:
+        padding_len = self.message_size(self.election) - len(values)
+        assert padding_len >= 0
+        if padding_len > 0:
+            values = tuple(values) + (0,) * padding_len
         async def single_exchange(tallier: Optional[TallierConn], values: Tuple[int, ...]) -> Tuple[int, ...]:
             if not tallier:
                 return values
@@ -230,9 +296,10 @@ class MpcValidation(MpcBase):
     async def validate_veto(self, msgid: int, votes: Tuple[int, ...]) -> bool:
         a_i = await self.multiply(msgid, votes, self.__calc_complement(votes, 1))
         s, *a_i = await self.resolve(msgid, (sum(votes) % self.p, ) + a_i)
-        return s == self.M - 1 and all((a == 0 for a in a_i))
+        M = len(self.election.candidates)
+        return s == M - 1 and all((a == 0 for a in a_i))
 
-    async def validate_range(self, msgbase: int, votes: [int], max_value: int):
+    async def validate_range(self, msgbase: int, votes: Tuple[int, ...], max_value: int):
         async def check_range(msgid: int, vote: int):
             mul = vote
             for i in range(max_value):
@@ -240,8 +307,8 @@ class MpcValidation(MpcBase):
             return 0 == await self.resolve(msgid, mul)
         return all(await asyncio.gather(*map(check_range, count(msgbase), votes)))
 
-    async def validate_borda(self, msgbase: int, votes: [int]):
-        async def check_pair(msgid, pair: [int, int]) -> bool:
+    async def validate_borda(self, msgbase: int, votes: Tuple[int, ...]):
+        async def check_pair(msgid, pair: Tuple[int, int]) -> bool:
             rnd = await self.random_number(msgid)
             mul = await self.multiply(msgid, rnd, (pair[0] - pair[1]) % self.p)
             return 0 != await self.resolve(msgid, mul)
@@ -252,6 +319,81 @@ class MpcValidation(MpcBase):
 
         return all(await asyncio.gather(self.validate_range(msgbase, votes, self.M - 1),
                                         two_stage_permute(msgbase + self.M)))
+
+    async def __validate_condorcer(self, msgbase: int, votes: Tuple[int, ...], q_m: Tuple[int, ...], is_maximin: bool):
+        async def nop():
+            return tuple()
+
+        q_pairs = [(a - b) % self.p for a, b in combinations(q_m, 2)]
+        product_pairs: int | None = None
+        resolve_zero: list[int] = []
+        ok_flag = True
+        M = len(self.election.candidates)
+        block_size = M - 1
+        for i in range(M+1):
+            muls1, muls2 = [], []
+            if final_q_pairs := len(q_pairs) == 1:
+                val = q_pairs.pop()
+                muls1, muls2 = [val], [val]
+            else:
+                to_mul, q_pairs = q_pairs[:2*block_size], q_pairs[2*block_size:]
+                if len(to_mul) % 2 == 1:
+                    q_pairs.append(to_mul.pop())
+                muls1, muls2 = to_mul[::2], to_mul[1::2]
+            pairs_count = len(muls1)
+
+            to_verify = block_size - len(muls1)
+            if to_verify > 0:
+                verify, votes = votes[:to_verify], votes[to_verify:]
+                if is_maximin:
+                    muls1.extend(verify)
+                    muls2.extend((v - 1) % self.p for v in verify)
+                else:
+                    muls1.extend((v + 1) % self.p for v in verify)
+                    muls2.extend((v - 1) % self.p for v in verify)
+
+            resolve_block_size = block_size - int(bool(product_pairs))
+            to_resolve, resolve_zero = resolve_zero[:resolve_block_size], resolve_zero[resolve_block_size:]
+            if product_pairs:
+                to_resolve.append(product_pairs)
+
+            mul_results, resolve_results = await asyncio.gather(
+                self.multiply(msgbase, muls1, muls2) if muls1 else nop(),
+                self.resolve(msgbase+1, to_resolve+[0]*(block_size - len(to_resolve))) if to_resolve else nop())
+            resolve_results = list(resolve_results[:len(to_resolve)])
+
+            if product_pairs:
+                ok_flag = ok_flag and resolve_results.pop() != 0
+                product_pairs = None
+            ok_flag = ok_flag and all(a == 0 for a in resolve_results)
+
+            if not final_q_pairs:
+                q_pairs.extend(mul_results[:pairs_count])
+            resolve_zero.extend(mul_results[pairs_count:])
+            if len(q_pairs) == 0 and pairs_count != 0:
+                product_pairs = mul_results[0]
+
+        return ok_flag
+
+    async def validate_copeland(self, msgbase: int, votes: Tuple[int, ...]):
+        def gamma(m1: int, m2: int):
+            if m1 == m2:
+                return 0
+            return votes[m2 - m1 - 1 + m1 * M - m1 * (m1 + 1) // 2]
+
+        M = len(self.election.candidates)
+        q_m = tuple(sum(gamma(m2, m1) if m2 < m1 else gamma(m1, m2) for m2 in range(M)) % self.p for m1 in range(M))
+        return await self.__validate_condorcer(msgbase, votes, q_m, False)
+
+    async def validate_maximin(self, msgbase: int, votes: Tuple[int, ...]):
+        def gamma(m1: int, m2: int):
+            if m1 == m2:
+                return 0
+            return votes[m2 - m1 - 1 + m1 * M - m1 * (m1 + 1) // 2]
+
+        M = len(self.election.candidates)
+        q_m = tuple((sum(gamma(m2, m1) if m2 < m1 else gamma(m1, m2) for m2 in range(M)) + M - m1) % self.p for m1 in range(M))
+        return await self.__validate_condorcer(msgbase, votes, q_m, True)
 
     def validate(self, msgid: int, votes: Tuple[int, ...]) -> Awaitable[bool]:
         if self.election.selected_election_type == ElectionType.approval:
@@ -264,6 +406,10 @@ class MpcValidation(MpcBase):
             return self.validate_range(msgid, votes)
         if self.election.selected_election_type == ElectionType.borda:
             return self.validate_borda(msgid, votes)
+        if self.election.selected_election_type == ElectionType.copeland:
+            return self.validate_copeland(msgid, votes)
+        if self.election.selected_election_type == ElectionType.maximin:
+            return self.validate_maximin(msgid, votes)
         raise NotImplementedError()
 
     @staticmethod
@@ -279,4 +425,8 @@ class MpcValidation(MpcBase):
             raise NotImplementedError()
         if election.selected_election_type == ElectionType.borda:
             raise NotImplementedError()
+        if election.selected_election_type == ElectionType.copeland:
+            return M - 1
+        if election.selected_election_type == ElectionType.maximin:
+            return M - 1
         raise NotImplementedError()

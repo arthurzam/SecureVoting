@@ -136,19 +136,16 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                 not_abstain = int(message['not_abstain'])
                 db_status = await db.vote_status(election.election_id, email)
 
-                if not_abstain == 0:
+                if not_abstain == 0 and db_status != 1:
                     logger.info("Abstain for %s in election %s", email, election.election_id)
+                    return await websocket.close(code=1000)
                 msg_id = get_user_id(email)
                 validate = await running_elections[election.election_id].validate(msg_id, votes)
                 if not validate:
                     logger.info("Invalid vote for %s in election %s", email, election.election_id)
-                votes_scale = int(validate) * await computation_mpc.multiply(msg_id, db_status, not_abstain)
-                res = await computation_mpc.resolve(msg_id, votes_scale)
-                new_votes = await running_elections[election.election_id].multiply(msg_id, votes, tuple(votes_scale for _ in votes))
-                new_db_status = await computation_mpc.multiply(msg_id, db_status, 1 - votes_scale)
-                logger.warning("Current state: abstain %d, db-status %d -> %d, validate %d", not_abstain, db_status, new_db_status, int(validate))
-                await db.vote(election, new_votes, email, new_db_status)
-                return await websocket.close(code=(1000 if res else 4000))
+                    return await websocket.close(code=4000)
+                await db.vote(election, votes, email, 1)
+                return await websocket.close(code=1000)
 
         except json.JSONDecodeError:
             logger.info('Badly formatted JSON message for %s', path)

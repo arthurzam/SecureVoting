@@ -9,6 +9,8 @@ class ElectionType(int, Enum):
     approval = 3
     veto = 4
     borda = 5
+    copeland = 6
+    maximin = 7
 
 
 class Election(NamedTuple):

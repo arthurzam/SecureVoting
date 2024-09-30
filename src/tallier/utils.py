@@ -18,17 +18,17 @@ from itertools import starmap
 import operator
 
 
-def clean_gen_shamir(value: int, key_count: int, threshold: int, p: int) -> tuple[int]:
+def clean_gen_shamir(value: int, key_count: int, threshold: int, p: int) -> tuple[int, ...]:
     a_i = [value] + choices(range(p), k=threshold - 1)
     return tuple(sum(a * pow(x + 1, i, p) for i, a in enumerate(a_i)) % p for x in range(key_count))
 
 
-def gen_shamir(value: int, key_count: int, threshold: int, p: int) -> [[int, int]]:
+def gen_shamir(value: int, key_count: int, threshold: int, p: int) -> tuple[tuple[int, int], ...]:
     a_i = [value] + choices(range(p), k=threshold - 1)
     return tuple((x, sum((a * x ** i for i, a in enumerate(a_i))) % p) for x in range(1, key_count + 1))
 
 
-def resolve(keys: [int], p: int):
+def resolve(keys: tuple[int, ...], p: int):
     def l(x_i, y_i):
         c1, c2 = 1, 1
         for x_j, _ in keys:
@@ -40,7 +40,7 @@ def resolve(keys: [int], p: int):
     return sum(starmap(l, keys)) % p
 
 
-def inverse(a, p):
+def inverse(a: int, p: int):
     def eliminate(r1, r2, col, target=0):
         fac = (r2[col]-target) * pow(r1[col], -1, p)
         for i in range(len(r2)):
@@ -134,15 +134,15 @@ def modular_sqrt(a, p):
         r = m
 
 
-def lagrange_polynomial(points: list[[int, int]], p: int):
-    def coeffs(a: [int]) -> [int]:
+def lagrange_polynomial(points: list[tuple[int, int]], p: int):
+    def coeffs(a: tuple[int, ...]) -> tuple[int, ...]:
         assert len(a) > 0
         if len(a) == 1:
             return [-a[0], 1]
         sub = coeffs(a[1:])
         return [(x - y * a[0]) % p for x, y in zip([0] + sub, sub + [0])]
 
-    def l_j(x_j: int) -> [int]:
+    def l_j(x_j: int) -> tuple[int, ...]:
         a = [x for x, _ in points if x != x_j]
         q = pow(reduce(operator.mul, (x_j - x for x in a)), -1, p)
         return [(x * q) % p for x in coeffs(a)]

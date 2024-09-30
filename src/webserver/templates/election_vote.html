@@ -55,7 +55,7 @@
     }
     return sum;
   }
-  function expmod( base, exp, mod ){
+  function expmod(base, exp, mod){
     if(exp === 0)
       return 1;
     else if(exp % 2 === 0)
@@ -142,6 +142,30 @@
     row.appendChild(box);
     return row;
   }
+  function votesystem_condorcer(name, idx) {
+    const row = document.createElement('tr');
+
+    const cellItem = document.createElement('label');
+    cellItem.appendChild(document.createTextNode(name));
+    const cell = document.createElement('td');
+    cell.appendChild(cellItem);
+    row.appendChild(cell);
+
+    config.candidates.forEach((_, i) => {
+      const cellItem = document.createElement('input');
+      cellItem.type = 'radio';
+      cellItem.name = `value${idx}`;
+      cellItem.value = i;
+      cellItem.addEventListener('change', (event) => {
+        event.target.value = parseInt(event.target.value);
+      });
+      const cell = document.createElement('td');
+      cell.appendChild(cellItem);
+      row.appendChild(cell);
+    });
+
+    return row;
+  }
 
   login_required();
 
@@ -167,7 +191,9 @@
           votesystem_range,
           votesystem_checkbox,
           (n, i) => votesystem_radio(n, i, true),
-          votesystem_borda
+          votesystem_borda,
+          votesystem_condorcer,
+          votesystem_condorcer,
         ][(config.selected_election_type - 1) || 0];
         config.candidates.forEach((name, idx) => {
           table.appendChild(gen_func(name, idx, 0));
@@ -175,11 +201,32 @@
       };
     }
   }
+  function collectVector(election_type) {
+    if (election_type <= 5) {
+      return config.candidates.map((name, idx) => parseInt(document.getElementById(`value${idx}`).getAttribute('value')));
+    } else if (election_type == 6 || election_type == 7) {
+      const unsetCandidate = config.candidates.find((_, idx) => !document.querySelector(`input[name=value${idx}]:checked`));
+      if (unsetCandidate) {
+        alert(`Unset value for ${unsetCandidate}`);
+        throw new Error(`Unset value for ${unsetCandidate}`);
+      }
+
+      const isMaximin = election_type == 7;
+      const selections = config.candidates.map((_, idx) => parseInt(document.querySelector(`input[name=value${idx}]:checked`).getAttribute('value')));
+      return selections.flatMap((c1, i) => selections.slice(i+1).map((c2) => {
+        if (c1 < c2) {
+          return 1;
+        } else if (isMaximin || c1 === c2) {
+          return 0;
+        }
+        return -1;
+      }));
+    }
+  }
   function send_vector(not_abstain) {
-    const votes = config.candidates.map((name, idx) => parseInt(document.getElementById(`value${idx}`).getAttribute('value')));
+    const votes = collectVector(config.selected_election_type || 1);
     const D = talliers.length, t = (D + 1) / 2;
     const shares = votes.map(vote => gen_shamir(vote, D, t, config.p));
-    console.log(shares);
 
     const url = new URL(window.location.href);
     const election_id = url.searchParams.get("id");
