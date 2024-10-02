@@ -237,20 +237,24 @@ class MpcWinner(MpcBase):
         val = (2 * self.p - 2 * a) % self.p # -2a mod p
         return await self.is_odd(msgid, val)
 
-    async def copeland_score(self, msgbase: int, m: int, M: int, s: int, t: int, votes: tuple[int]) -> int:
-        def gamma(m1: int, m2: int):
+    async def copeland_scores(self, msgbase: int, M: int, s: int, t: int, votes: tuple[int, ...]) -> tuple[int, ...]:
+        def gamma(m1: int, m2: int): # m1 <= m2
             if m1 == m2:
                 return 0
             return votes[m2 - m1 - 1 + m1 * M - m1 * (m1 + 1) // 2]
 
-        positives = []
-        positives.extend((gamma(m, m2) for m2 in range(m+1, M)))
-        positives.extend((self.p - gamma(m2, m) for m2 in range(0, m)))
-        zeros = []
-        zeros.extend((gamma(m, m2) for m2 in range(m+1, M)))
-        zeros.extend((gamma(m2, m) for m2 in range(0, m)))
-        return t * sum(await asyncio.gather(*map(self.is_positive, count(msgbase, self.block_size), positives))) + \
-               s * sum(await asyncio.gather(*map(self.is_zero, count(msgbase, 1), zeros)))
+        async def single_score(msgbase: int, m: int):
+            positives = [gamma(m, m2) for m2 in range(m+1, M)] + [self.p - gamma(m2, m) for m2 in range(0, m)]
+            zeros = [gamma(m, m2) for m2 in range(m+1, M)] + [gamma(m2, m) for m2 in range(0, m)]
+
+            zeros, positives = await asyncio.gather(
+                asyncio.gather(*map(self.is_zero, count(msgbase, 1), zeros)), # M-1 computations with width=1
+                asyncio.gather(*map(self.is_positive, count(msgbase + M-1, self.block_size), positives)), # M-1 computations with width=block_size
+            )
+            return (t * sum(positives) + s * sum(zeros)) % self.p
+
+        calc_width = (M - 1) * (1 + self.block_size)
+        return tuple(await asyncio.gather(*map(single_score, count(msgbase, calc_width), range(M))))
 
 def _transpose(values: Tuple[Tuple[int, ...], ...]) -> Tuple[Tuple[int, ...], ...]:
     return tuple(map(tuple, zip(*values)))
