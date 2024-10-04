@@ -11,10 +11,11 @@ from mytypes import Election, ElectionType
 from utils import clean_gen_shamir
 
 class QueueTallier(TallierConn):
-    def __init__(self, reader: asyncio.Queue[bytes], writer: asyncio.Queue[bytes]):
+    def __init__(self, size: int, reader: asyncio.Queue[bytes], writer: asyncio.Queue[bytes]):
         self.reader, self.writer = reader, writer
         self.queue: dict[int, list[int] | asyncio.Future] = {}
-        self.struct = Struct('>II')
+        self.size = size
+        self.struct = Struct('>I' + self.size * 'I')
 
     async def close(self):
         try:
@@ -26,28 +27,28 @@ class QueueTallier(TallierConn):
     async def read(self, msgid: int) -> tuple[int, ...]:
         if msgid in self.queue:
             if len(a := self.queue[msgid]) > 1:
-                return (a.pop(0), )
+                return a.pop(0)
             else:
-                return (self.queue.pop(msgid)[0], )
+                return self.queue.pop(msgid)[0]
         else:
             fut = asyncio.get_event_loop().create_future()
             self.queue[msgid] = fut
-            return (await fut, )
+            return await fut
 
     async def write(self, msgid: int, values: tuple[int, ...]):
-        await self.writer.put(self.struct.pack(msgid, values[0]))
+        pad = (0, ) * (self.size - len(values))
+        await self.writer.put(self.struct.pack(msgid, *values, *pad))
 
     async def receive_loop(self):
         try:
             while True:
                 data = await self.reader.get()
                 assert len(data) == self.struct.size, "Invalid message size"
-                msgid, share = self.struct.unpack(data)
+                msgid, *share = self.struct.unpack(data)
                 if isinstance(a := self.queue.setdefault(msgid, []), list):
-                    a.append(share)
+                    a.append(tuple(share))
                 else:
-                    self.queue.pop(msgid).set_result(share)
-                self.reader.task_done()
+                    self.queue.pop(msgid).set_result(tuple(share))
         except asyncio.CancelledError:
             await self.close()
 
@@ -67,17 +68,17 @@ async def clique_3():
 
     a = MpcWinner(mock_election, [
         None,
-        QueueTallier(edge_b_a, edge_a_b),
-        QueueTallier(edge_c_a, edge_a_c),
+        QueueTallier(1, edge_b_a, edge_a_b),
+        QueueTallier(1, edge_c_a, edge_a_c),
     ])
     b = MpcWinner(mock_election, [
-        QueueTallier(edge_a_b, edge_b_a),
+        QueueTallier(1, edge_a_b, edge_b_a),
         None,
-        QueueTallier(edge_c_b, edge_b_c),
+        QueueTallier(1, edge_c_b, edge_b_c),
     ])
     c = MpcWinner(mock_election, [
-        QueueTallier(edge_a_c, edge_c_a),
-        QueueTallier(edge_b_c, edge_c_b),
+        QueueTallier(1, edge_a_c, edge_c_a),
+        QueueTallier(1, edge_b_c, edge_c_b),
         None,
     ])
 
@@ -184,7 +185,7 @@ async def test_copeland_score(clique_3, ballot, expected):
     ballot_shares = build_ballot_shares(ballot)
 
     async def code(t: MpcWinner, *votes: int) -> tuple[int, ...]:
-        scores = await t.copeland_score(0, len(ballot), alpha_s, alpha_t, votes)
+        scores = await t.copeland_scores(0, len(ballot), alpha_s, alpha_t, votes)
         return tuple(await asyncio.gather(*map(t.resolve, count(1), scores)))
 
     response = await asyncio.gather(*map(code, clique_3, *ballot_shares))
