@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022 Arthur Zamarin
+# Copyright (C) 2021-2024 Arthur Zamarin
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,14 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from struct import pack, unpack, Struct
-from typing import Tuple, Dict, Optional, List, Union
+import asyncio
+import logging
+import ssl
+from struct import Struct
 from dataclasses import dataclass
 from uuid import UUID
 from pathlib import Path
-import logging
-import asyncio
-import ssl
 
 from mpc import MpcValidation, MpcWinner, TallierConn, TallierConnFactory
 from mytypes import Election, TallierAddress
@@ -31,9 +30,9 @@ TALLIER_PORT = 18080
 
 
 class Tallier(TallierConn):
-    def __init__(self, reader: Optional[asyncio.StreamReader], writer: Optional[asyncio.StreamWriter]):
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         self.reader, self.writer = reader, writer
-        self.queue: Dict[int, Union[List[int], asyncio.Future]] = {}
+        self.queue: dict[int, list[int] | asyncio.Future] = {}
         self.struct = Struct('>II')
 
     async def close(self):
@@ -43,7 +42,7 @@ class Tallier(TallierConn):
         except Exception as e:
             logger.error("MultiTallier::close", exc_info=e)
 
-    async def read(self, msgid: int) -> Tuple[int, ...]:
+    async def read(self, msgid: int) -> tuple[int, ...]:
         if msgid in self.queue:
             if len(a := self.queue[msgid]) > 1:
                 return (a.pop(0), )
@@ -54,11 +53,14 @@ class Tallier(TallierConn):
             self.queue[msgid] = fut
             return (await fut, )
 
-    async def write(self, msgid: int, values: Tuple[int, ...]):
-        self.writer.write(self.struct.pack(msgid, values[0]))
-        await self.writer.drain()
+    async def write(self, msgid: int, values: tuple[int, ...]):
+        if self.writer is not None:
+            self.writer.write(self.struct.pack(msgid, values[0]))
+            await self.writer.drain()
 
     async def receive_loop(self):
+        if self.reader is None:
+            return
         logger.info("receive_loop")
         try:
             while True:
@@ -71,21 +73,10 @@ class Tallier(TallierConn):
             await self.close()
 
 
-class TallierSelf(Tallier):
-    def __init__(self):
-        Tallier.__init__(self, None, None)
-
-    async def close(self):
-        pass
-
-    async def write(self, msgid: int, values: Tuple[int, ...]):
-        self.queue.setdefault(msgid, []).append(values[0])
-
-
 class MultiTallier(TallierConn):
-    def __init__(self, size: int, reader: Optional[asyncio.StreamReader], writer: Optional[asyncio.StreamWriter]):
+    def __init__(self, size: int, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         self.reader, self.writer = reader, writer
-        self.queue: Dict[int, Union[List[int], asyncio.Future]] = {}
+        self.queue: dict[int, list[tuple[int, ...]] | asyncio.Future[tuple[int, ...]]] = {}
         self.size = size
         self.struct = Struct('>I' + self.size * 'I')
 
@@ -96,7 +87,7 @@ class MultiTallier(TallierConn):
         except Exception as e:
             logger.error("MultiTallier::close", exc_info=e)
 
-    async def read(self, msgid: int) -> Tuple[int, ...]:
+    async def read(self, msgid: int) -> tuple[int, ...]:
         if msgid in self.queue:
             if len(a := self.queue[msgid]) > 1:
                 return a.pop(0)
@@ -107,7 +98,7 @@ class MultiTallier(TallierConn):
             self.queue[msgid] = fut
             return await fut
 
-    async def write(self, msgid: int, values: Tuple[int, ...]):
+    async def write(self, msgid: int, values: tuple[int, ...]):
         pad = (0, ) * (self.size - len(values))
         self.writer.write(self.struct.pack(msgid, *values, *pad))
         await self.writer.drain()
@@ -141,7 +132,7 @@ class MpcWaitItem():
     election_id: UUID
 
     tallier_factory: TallierConnFactory
-    talliers: List[Optional[TallierConn]]
+    talliers: list[TallierConn | None]
     missing_talliers: int
 
     collected_all: asyncio.Event
@@ -154,13 +145,13 @@ class MpcWaitItem():
 
 class TallierManager:
     def __init__(self, server_certfile: Path, ca_certfile: Path):
-        self.mpc_wait_list: Dict[UUID, MpcWaitItem] = {}
-        self.config_wait_list: Dict[UUID, asyncio.Event] = {}
-        self.server = asyncio.start_server(self._react_conn, port=TALLIER_PORT, ssl=server_ssl_key(server_certfile))
+        self.mpc_wait_list: dict[UUID, MpcWaitItem] = {}
+        self.config_wait_list: dict[UUID, asyncio.Event] = {}
+        self.server_fac = asyncio.start_server(self._react_conn, port=TALLIER_PORT, ssl=server_ssl_key(server_certfile))
         self.ca_certfile = ca_certfile
 
     async def __aenter__(self):
-        self.server = await self.server
+        self.server = await self.server_fac
         return self
 
     async def __aexit__(self, *args, **kargs):
@@ -223,9 +214,9 @@ class TallierManager:
         except Exception as e:
             logger.error('failed on connection reaction', exc_info=e)
 
-    async def start_clique(self, election_id: UUID, wanted_talliers: List[TallierAddress], self_id: int, tallier_factory: TallierConnFactory) -> List[TallierConn]:
+    async def start_clique(self, election_id: UUID, wanted_talliers: list[TallierAddress], self_id: int, tallier_factory: TallierConnFactory) -> list[TallierConn | None]:
         logger.info('Loading clique %s', election_id)
-        base_talliers = [None for _ in wanted_talliers]
+        base_talliers: list[TallierConn | None] = [None for _ in wanted_talliers]
         wait_item = MpcWaitItem(self_id, election_id, tallier_factory, base_talliers, len(base_talliers) - 1, asyncio.Event())
         self.mpc_wait_list[election_id] = wait_item
         if wait_config := self.config_wait_list.pop(election_id, None):
@@ -238,14 +229,14 @@ class TallierManager:
         del self.mpc_wait_list[election_id]
         return list(wait_item.talliers)
 
-    async def start_election_voting(self, election: Election, wanted_talliers: List[TallierAddress], self_id: int) -> MpcValidation:
+    async def start_election_voting(self, election: Election, wanted_talliers: list[TallierAddress], self_id: int) -> MpcValidation:
         m = MpcValidation.message_size(election)
         def tallier_factory(reader, writer):
             return MultiTallier(m, reader, writer)
         talliers = await self.start_clique(election.election_id, wanted_talliers, self_id, tallier_factory)
         return MpcValidation(election, talliers)
 
-    async def calc_winners(self, election: Election, wanted_talliers: List[TallierAddress], self_id: int, votes_vector: Tuple[int, ...]) -> Tuple[str, ...]:
+    async def calc_winners(self, election: Election, wanted_talliers: list[TallierAddress], self_id: int, votes_vector: tuple[int, ...]) -> tuple[str, ...]:
         logger.info('Starting winner for %s with %s', election.election_id, votes_vector)
         def tallier_factory(reader, writer):
             return Tallier(reader, writer)

@@ -1,10 +1,9 @@
-import contextlib
-from typing import Dict, Optional, Tuple
-import websockets as ws
-from uuid import UUID
-import logging
 import asyncio
 import json
+import logging
+from uuid import UUID
+
+import websockets as ws
 
 from db import DBconn
 from mpc_manager import TallierManager, Tallier
@@ -12,21 +11,21 @@ from mpc import MpcValidation, MpcWinner
 from mytypes import Election, ElectionType
 
 
-running_elections: Dict[UUID, MpcValidation] = {}
-computation_mpc: Optional[MpcWinner] = None
+running_elections: dict[UUID, MpcValidation] = {}
+computation_mpc: MpcWinner | None = None
 
 def get_user_id(email: str):
     from hashlib import sha1
     return int(sha1(email.encode("utf-8")).hexdigest(), 16) % 2147483647
 
 
-def clean_user_array(arr: Tuple[str, ...]) -> Tuple[str, ...]:
+def clean_user_array(arr: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(k for k in dict.fromkeys(map(str.strip, arr)) if k)
 
 
 def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_talliers):
     async def make_computation_mpc() -> MpcWinner:
-        computation_election = Election(UUID(bytes=b'\0'*16), "__computation__", "", ElectionType.approval, [], 1, 2147483647, 1)
+        computation_election = Election(UUID(bytes=b'\0'*16), "__computation__", "", ElectionType.approval, (), 1, 2147483647, 1)
         talliers = await manager.start_clique(computation_election.election_id, wanted_talliers, tallier_id, Tallier)
         return MpcWinner(computation_election, talliers)
 

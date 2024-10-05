@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
+import logging
+import math
+import operator
 from functools import lru_cache
 from itertools import combinations, count, repeat
-from typing import Callable, Awaitable, Dict, Iterable, List, Optional, Tuple, Sequence
 from random import randint
-import operator
-import logging
-import asyncio
-import math
+from typing import Callable, Awaitable, List, Optional, Tuple, Sequence
 
 from mytypes import Election, ElectionType
 import utils
@@ -43,7 +43,7 @@ class TallierConn:
 TallierConnFactory = Callable[[asyncio.StreamReader, asyncio.StreamWriter], TallierConn]
 
 class MpcBase:
-    def __init__(self, election: Election, talliers: Sequence[TallierConn]):
+    def __init__(self, election: Election, talliers: Sequence[TallierConn | None]):
         self.election = election
         self.D = len(talliers)
         self.p = election.p
@@ -62,7 +62,7 @@ class MpcBase:
 
 
 class MpcWinner(MpcBase):
-    def __init__(self, election: Election, talliers: Sequence[TallierConn]):
+    def __init__(self, election: Election, talliers: Sequence[TallierConn | None]):
         super().__init__(election, talliers)
 
         self.block_size = int(2 * math.ceil(math.sqrt(math.ceil(math.log2(self.p)))) ** 2)
@@ -146,7 +146,7 @@ class MpcWinner(MpcBase):
         return res % self.p
 
     async def prefix_or(self, msgid: int, a_i: List[int]) -> List[int]:  # Prefix-Or
-        async def calc_mul(msgbase: int, first: int, seconds: Iterable[int]) -> Tuple[int]:
+        async def calc_mul(msgbase: int, first: int, seconds: Sequence[int]) -> list[int]:
             return await asyncio.gather(*map(self.multiply, count(msgbase), repeat(first), seconds))
         assert len(a_i) > 0
         orig_len = len(a_i)
@@ -162,12 +162,12 @@ class MpcWinner(MpcBase):
         s_ij = await asyncio.gather(*map(calc_mul, count(msgid, lam), f_i, repeat(h_j)))
         return [(s + y - f) % self.p for s_ij_i, y, f in zip(s_ij, y_i, f_i) for s in s_ij_i][:orig_len]
 
-    async def xor(self, msgid: int, a_i: List[int], b_i: List[int]) -> List[int]:
+    async def xor(self, msgid: int, a_i: Sequence[int], b_i: Sequence[int]) -> list[int]:
         assert len(a_i) == len(b_i)
         c_i = await asyncio.gather(*map(self.multiply, count(msgid), a_i, b_i))
         return [(a + b - 2 * c) % self.p for a, b, c in zip(a_i, b_i, c_i)]
 
-    async def less_bitwise(self, msgid: int, a_i: List[int], b_i: List[int]) -> int:  # Bitwise Less-Than
+    async def less_bitwise(self, msgid: int, a_i: Sequence[int], b_i: Sequence[int]) -> int:  # Bitwise Less-Than
         assert len(a_i) == len(b_i) > 0
         c_i = await self.xor(msgid, a_i, b_i)
         c_i.reverse()
@@ -177,14 +177,14 @@ class MpcWinner(MpcBase):
         h_i = await asyncio.gather(*map(self.multiply, count(msgid), e_i, b_i))
         return sum(h_i) % self.p
 
-    async def random_number_bits(self, msgid: int) -> Tuple[int]:  # Joint Random Number Bitwise-Sharing
+    async def random_number_bits(self, msgid: int) -> tuple[int, ...]:  # Joint Random Number Bitwise-Sharing
         while True:
             bits_count = math.ceil(math.log2(self.p))
             r_i = await asyncio.gather(*map(self.random_bit, range(msgid, msgid + bits_count)))
             p_i = [int(digit) for digit in reversed(bin(self.p)[2:])]
             check_bit = await self.resolve(msgid, await self.less_bitwise(msgid, r_i, p_i))
             if check_bit == 1:
-                return r_i
+                return tuple(r_i)
 
     async def is_odd(self, msgid: int, x: int) -> int:  # LSB of number
         r_i = await self.random_number_bits(msgid)
@@ -207,13 +207,21 @@ class MpcWinner(MpcBase):
         d = (x + y - c) % self.p
         return (await self.multiply(msgid, w, (d - c) % self.p) + 1 - d) % self.p
 
-    async def __max_index(self, msgid: int, a: Tuple[Tuple[int, int], ...], b: Tuple[Tuple[int, int], ...]) -> Tuple[Tuple[int, int], ...]:
+    async def __max_index(self, msgid: int, a: tuple[int, int], b: tuple[int, int]) -> tuple[int, int]:
         c = await self.less(msgid, a[1], b[1])
-        a = await asyncio.gather(self.multiply(msgid, c, b[1]),
-                                    self.multiply(msgid + 1, c, b[0]),
-                                    self.multiply(msgid + 2, (1 - c) % self.p, a[1]),
-                                    self.multiply(msgid + 3, (1 - c) % self.p, a[0]))
-        return (a[1] + a[3]) % self.p, (a[0] + a[2]) % self.p
+        v1, i1, v2, i2 = await asyncio.gather(self.multiply(msgid, c, b[1]),
+                                              self.multiply(msgid + 1, c, b[0]),
+                                              self.multiply(msgid + 2, (1 - c) % self.p, a[1]),
+                                              self.multiply(msgid + 3, (1 - c) % self.p, a[0]))
+        return (i1 + i2) % self.p, (v1 + v2) % self.p
+
+    async def max(self, msgbase: int, votes: Sequence[int]) -> int:
+        if len(votes) == 1:
+            return 0
+        votes_idx = tuple(enumerate(votes))
+        while len(votes_idx) > 1:
+            votes_idx = tuple(await asyncio.gather(*(map(self.__max_index, count(msgbase, 3 * self.block_size), votes_idx[::2], votes_idx[1::2])))) + votes_idx[len(votes_idx)^1:]
+        return await self.resolve(msgbase, votes_idx[0][0])
 
     async def is_zero(self, msgid: int, a: int) -> int:
         n = self.p - 1
@@ -224,14 +232,6 @@ class MpcWinner(MpcBase):
             result = await self.multiply(msgid, result, result)
             n = n // 2
         return (self.p + 1 - result) % self.p # 1 - result
-
-    async def max(self, msgbase: int, votes: Sequence[int]) -> int:
-        if len(votes) == 1:
-            return 0
-        votes_idx = list(enumerate(votes))
-        while len(votes_idx) > 1:
-            votes_idx = await asyncio.gather(*(map(self.__max_index, count(msgbase, 3 * self.block_size), votes_idx[::2], votes_idx[1::2]))) + votes_idx[len(votes_idx)^1:]
-        return await self.resolve(msgbase, votes_idx[0][0])
 
     async def is_positive(self, msgid: int, a: int) -> int:
         val = (2 * self.p - 2 * a) % self.p # -2a mod p
@@ -256,21 +256,19 @@ class MpcWinner(MpcBase):
         calc_width = (M - 1) * (1 + self.block_size)
         return tuple(await asyncio.gather(*map(single_score, count(msgbase, calc_width), range(M))))
 
-def _transpose(values: Tuple[Tuple[int, ...], ...]) -> Tuple[Tuple[int, ...], ...]:
-    return tuple(map(tuple, zip(*values)))
 
 class MpcValidation(MpcBase):
-    async def exchange(self, msgid: int, values: Tuple[Tuple[int, ...], ...]) -> Tuple[Tuple[int, ...], ...]:
+    async def exchange(self, msgid: int, values: tuple[tuple[int, ...], ...]) -> tuple[tuple[int, ...], ...]:
         padding_len = self.message_size(self.election) - len(values)
         assert padding_len >= 0
-        async def single_exchange(tallier: Optional[TallierConn], values: Tuple[int, ...]) -> Tuple[int, ...]:
+        async def single_exchange(tallier: Optional[TallierConn], values: tuple[int, ...]) -> tuple[int, ...]:
             if not tallier:
                 return values
             await tallier.write(msgid, values + (0,) * padding_len)
             return (await tallier.read(msgid))[:len(values)]
-        return _transpose(tuple(await asyncio.gather(*map(single_exchange, self.talliers, _transpose(values)))))
+        return utils.transpose(tuple(await asyncio.gather(*map(single_exchange, self.talliers, utils.transpose(values)))))
 
-    async def multiply(self, msgid: int, a_i: Tuple[int, ...], b_i: Tuple[int, ...]) -> Tuple[int, ...]:
+    async def multiply(self, msgid: int, a_i: tuple[int, ...], b_i: tuple[int, ...]) -> Tuple[int, ...]:
         res_i = await self.exchange(msgid, tuple(self.gen_shamir((a * b) % self.p) for a, b in zip(a_i, b_i)))
         return tuple(sum(map(operator.mul, self.vandermond_first_row, res)) % self.p for res in res_i)
 
@@ -282,9 +280,9 @@ class MpcValidation(MpcBase):
         r_i_i = tuple(self.gen_shamir(randint(0, self.p - 1)) for _ in range(amount))
         return tuple(sum(res) % self.p for res in await self.exchange(msgid, r_i_i))
 
-    async def is_zero(self, msgid: int, a_i: Tuple[int, ...]) -> int:
+    async def is_zero(self, msgid: int, a_i: tuple[int, ...]) -> tuple[int, ...]:
         n = self.p - 1
-        result = [1] * len(a_i)
+        result = (1, ) * len(a_i)
         while n > 0: # result = a ** (p - 1) mod p
             if n % 2 == 1:
                 result = await self.multiply(msgid, result, a_i)
@@ -320,7 +318,7 @@ class MpcValidation(MpcBase):
         M = len(self.election.candidates)
         return s == M - 1 and all((a == 0 for a in a_i))
 
-    async def validate_range(self, msgbase: int, votes: Tuple[int, ...], max_value: int):
+    async def validate_range(self, msgbase: int, votes: tuple[int, ...], max_value: int):
         async def check_range(msgid: int, vote: int):
             mul = vote
             for i in range(max_value):
@@ -330,7 +328,7 @@ class MpcValidation(MpcBase):
 
     async def validate_borda(self, msgbase: int, votes: Tuple[int, ...]):
         async def check_pair(msgid, pair: Tuple[int, int]) -> bool:
-            rnd = await self.random_number(msgid)
+            rnd = await self.random_number(msgid, amount=len(votes))
             mul = await self.multiply(msgid, rnd, (pair[0] - pair[1]) % self.p)
             return 0 != await self.resolve(msgid, mul)
 

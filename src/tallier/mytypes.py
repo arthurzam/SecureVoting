@@ -1,4 +1,4 @@
-from typing import List, NamedTuple
+from typing import NamedTuple
 from uuid import UUID
 from enum import Enum
 
@@ -18,7 +18,7 @@ class Election(NamedTuple):
     election_name: str
     manager_email: str
     selected_election_type: ElectionType
-    candidates: List[str]
+    candidates: tuple[str, ...]
     winner_count: int
     p: int
     L: int
