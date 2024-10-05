@@ -1,12 +1,13 @@
 import asyncio
-from itertools import count
+import string
+from itertools import count, product
 from random import randint
 from struct import Struct
 
 import pytest
 import pytest_asyncio
 
-from mpc import TallierConn, MpcWinner
+from mpc import TallierConn, MpcWinner, MpcValidation, _transpose
 from mytypes import Election, ElectionType
 from utils import clean_gen_shamir
 
@@ -203,3 +204,69 @@ async def test_copeland_winner(clique_3, ballot, expected):
 
     response = await asyncio.gather(*map(code, clique_3, *ballot_shares))
     assert response == [expected] * len(clique_3)
+
+
+@pytest.mark.asyncio
+class TestMpcValidation:
+    copeland_candidates = 4
+    tallier_size = copeland_candidates * (copeland_candidates - 1) // 2
+
+    @pytest.fixture(scope="class")
+    def mock_election(self):
+        candidates = list(string.ascii_uppercase)[:self.copeland_candidates]
+        return Election(None, "Arthur", "a@a.com", ElectionType.copeland, candidates, 1, p, 5)
+
+    @pytest_asyncio.fixture
+    async def clique(self, mock_election):
+        talliers = generate_clique_talliers(clique_size=3, tallier_size=self.tallier_size)
+        clique_mpc = tuple(MpcValidation(mock_election, t) for t in talliers)
+        yield clique_mpc
+        await asyncio.gather(*(t.close() for t in clique_mpc))
+
+    async def test_multiply(self, clique):
+        a = [randint(0, p - 1) for _ in range(self.tallier_size)]
+        b = [randint(0, p - 1) for _ in range(self.tallier_size)]
+        expected = tuple((x * y) % p for x, y in zip(a, b))
+
+        shares_a = _transpose(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in a)
+        shares_b = _transpose(clean_gen_shamir(y, len(clique), (len(clique) + 1) // 2, p) for y in b)
+
+        async def code(t: MpcValidation, x: tuple[int, ...], y: tuple[int, ...]) -> int:
+            return await t.resolve(0, await t.multiply(0, x, y))
+
+        response = await asyncio.gather(*map(code, clique, shares_a, shares_b))
+        assert response == [expected] * len(clique)
+
+    async def test_is_zero(self, clique):
+        a = list(range(self.tallier_size))
+        shares = _transpose(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in a)
+        expected = tuple(int(x == 0) for x in a)
+
+        async def code(t: MpcValidation, x: tuple[int, ...]) -> int:
+            return await t.resolve(0, await t.is_zero(0, x))
+
+        response = await asyncio.gather(*map(code, clique, shares))
+        assert response == [expected] * len(clique)
+
+    valid_ballots = sorted({tuple(build_ballot(scores)) for scores in product(range(copeland_candidates), repeat=copeland_candidates)})
+    invalid_ballots = sorted(set(product((p-1,0,1), repeat=tallier_size)) - set(valid_ballots))
+
+    @pytest.mark.parametrize("ballot", (pytest.param(s, id=f"scores={s}") for s in valid_ballots))
+    async def test_validate_copeland_valid(self, clique, ballot):
+        shares = _transpose(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in ballot)
+
+        async def code(t: MpcValidation, x: tuple[int, ...]) -> bool:
+            return await t.validate_copeland(0, x)
+
+        response = await asyncio.gather(*map(code, clique, shares))
+        assert response == [True] * len(clique)
+
+    @pytest.mark.parametrize("ballot", (pytest.param(s, id=f"scores={s}") for s in invalid_ballots))
+    async def test_validate_copeland_invalid(self, clique, ballot):
+        shares = _transpose(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in ballot)
+
+        async def code(t: MpcValidation, x: tuple[int, ...]) -> bool:
+            return await t.validate_copeland(0, x)
+
+        response = await asyncio.gather(*map(code, clique, shares))
+        assert response == [False] * len(clique)

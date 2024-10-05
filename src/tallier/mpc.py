@@ -263,12 +263,10 @@ class MpcValidation(MpcBase):
     async def exchange(self, msgid: int, values: Tuple[Tuple[int, ...], ...]) -> Tuple[Tuple[int, ...], ...]:
         padding_len = self.message_size(self.election) - len(values)
         assert padding_len >= 0
-        if padding_len > 0:
-            values = tuple(values) + (0,) * padding_len
         async def single_exchange(tallier: Optional[TallierConn], values: Tuple[int, ...]) -> Tuple[int, ...]:
             if not tallier:
                 return values
-            await tallier.write(msgid, values)
+            await tallier.write(msgid, values + (0,) * padding_len)
             return (await tallier.read(msgid))[:len(values)]
         return _transpose(tuple(await asyncio.gather(*map(single_exchange, self.talliers, _transpose(values)))))
 
@@ -283,6 +281,25 @@ class MpcValidation(MpcBase):
     async def random_number(self, msgid: int, amount: int) -> Tuple[int, ...]:  # Joint Random Number Sharing
         r_i_i = tuple(self.gen_shamir(randint(0, self.p - 1)) for _ in range(amount))
         return tuple(sum(res) % self.p for res in await self.exchange(msgid, r_i_i))
+
+    async def is_zero(self, msgid: int, a_i: Tuple[int, ...]) -> int:
+        n = self.p - 1
+        result = [1] * len(a_i)
+        while n > 0: # result = a ** (p - 1) mod p
+            if n % 2 == 1:
+                result = await self.multiply(msgid, result, a_i)
+            result = await self.multiply(msgid, result, result)
+            n = n // 2
+        return tuple((self.p + 1 - r) % self.p for r in result) # 1 - result
+
+    async def multi_products(self, msgid: int, Muls: list[tuple[int, ...]]) -> tuple[int, ...]:
+        while any(len(Mul) > 1 for Mul in Muls):
+            amounts, pairs_a, pairs_b = zip(*((len(Mul)//2, Mul[:len(Mul)&~1:2], Mul[1::2]) for Mul in Muls))
+            products = await self.multiply(msgid, sum(pairs_a, start=()), sum(pairs_b, start=()))
+            for idx, (Mul, amount) in enumerate(zip(Muls, amounts)):
+                Muls[idx] = products[:amount] + Mul[len(Mul)&~1:]
+                products = products[amount:]
+        return tuple(Mul[0] if Mul else 1 for Mul in Muls)
 
     def __calc_complement(self, votes: Tuple[int, ...], complement: int) -> Tuple[int, ...]:
         return tuple((complement - a) % self.p for a in votes)
@@ -324,70 +341,68 @@ class MpcValidation(MpcBase):
         return all(await asyncio.gather(self.validate_range(msgbase, votes, self.M - 1),
                                         two_stage_permute(msgbase + self.M)))
 
-    async def __validate_condorcer(self, msgbase: int, votes: Tuple[int, ...], q_m: Tuple[int, ...], is_maximin: bool):
-        async def nop():
-            return tuple()
-
-        q_pairs = [(a - b) % self.p for a, b in combinations(q_m, 2)]
-        product_pairs: int | None = None
-        resolve_zero: list[int] = []
-        ok_flag = True
+    async def __validate_condorcer(self, msgbase: int, Q: tuple[tuple[int, ...], ...]):
         M = len(self.election.candidates)
-        block_size = M - 1
-        for i in range(M+1):
-            muls1, muls2 = [], []
-            if final_q_pairs := len(q_pairs) == 1:
-                val = q_pairs.pop()
-                muls1, muls2 = [val], [val]
-            else:
-                to_mul, q_pairs = q_pairs[:2*block_size], q_pairs[2*block_size:]
-                if len(to_mul) % 2 == 1:
-                    q_pairs.append(to_mul.pop())
-                muls1, muls2 = to_mul[::2], to_mul[1::2]
-            pairs_count = len(muls1)
-
-            to_verify = block_size - len(muls1)
-            if to_verify > 0:
-                verify, votes = votes[:to_verify], votes[to_verify:]
-                if is_maximin:
-                    muls1.extend(verify)
-                    muls2.extend((v - 1) % self.p for v in verify)
-                else:
-                    muls1.extend((v + 1) % self.p for v in verify)
-                    muls2.extend((v - 1) % self.p for v in verify)
-
-            resolve_block_size = block_size - int(bool(product_pairs))
-            to_resolve, resolve_zero = resolve_zero[:resolve_block_size], resolve_zero[resolve_block_size:]
-            if product_pairs:
-                to_resolve.append(product_pairs)
-
-            mul_results, resolve_results = await asyncio.gather(
-                self.multiply(msgbase, muls1, muls2) if muls1 else nop(),
-                self.resolve(msgbase+1, to_resolve+[0]*(block_size - len(to_resolve))) if to_resolve else nop())
-            resolve_results = list(resolve_results[:len(to_resolve)])
-
-            if product_pairs:
-                ok_flag = ok_flag and resolve_results.pop() != 0
-                product_pairs = None
-            ok_flag = ok_flag and all(a == 0 for a in resolve_results)
-
-            if not final_q_pairs:
-                q_pairs.extend(mul_results[:pairs_count])
-            resolve_zero.extend(mul_results[pairs_count:])
-            if len(q_pairs) == 0 and pairs_count != 0:
-                product_pairs = mul_results[0]
-
-        return ok_flag
-
-    async def validate_copeland(self, msgbase: int, votes: Tuple[int, ...]):
-        def gamma(m1: int, m2: int):
+        def pos(shares: tuple[int, ...], m1: int, m2: int):
             if m1 == m2:
                 return 0
+            if m2 < m1:
+                return -pos(shares, m1=m2, m2=m1) % self.p
+            return shares[m2 - m1 - 1 + m1 * M - m1 * (m1 + 1) // 2]
+
+        # sub protocol 3, lines 6-10
+        x = await self.multiply(msgbase, tuple(Q[mP][m] for mP, m in combinations(range(M), 2)),
+                                tuple((Q[mP][m] + 1) % self.p for mP, m in combinations(range(M), 2)))
+        x = await self.multiply(msgbase, x,
+                                tuple((Q[mP][m] - 1) % self.p for mP, m in combinations(range(M), 2)))
+        x = await self.resolve(msgbase, x)
+        if any(x_i != 0 for x_i in x):
+            return False
+
+        # sub protocol 3, lines 11-17
+        xi = await self.is_zero(msgbase, tuple(Q[mP][m] for mP, m in combinations(range(M), 2)))
+        for k in range(M):
+            pi = await self.multiply(msgbase, xi,
+                                     tuple((Q[mP][k] - Q[m][k]) % self.p for mP, m in combinations(range(M), 2)))
+            pi = await self.resolve(msgbase, pi)
+            if any(pi_i != 0 for pi_i in pi):
+                return False
+
+        # sub protocol 3, lines 18-19
+        eta = await self.multi_products(msgbase, [tuple((1 - pos(xi, mP, m)) % self.p for mP in range(m)) for m in range(M)])
+
+        # sub protocol 3, lines 20-21
+        Q1_idx = {(mP, m): idx for idx, (mP, m) in enumerate(combinations(range(M), 2))}
+        Q1 = await self.multiply(msgbase, *zip(*((eta[mP], Q[m][mP]) for mP, m in combinations(range(M), 2))))
+        Q2_idx = {(mP, m): idx for idx, (m, mP) in enumerate(combinations(range(M), 2))}
+        Q2 = await self.multiply(msgbase, *zip(*((eta[mP], Q[m][mP]) for m, mP in combinations(range(M), 2))))
+        Q_m = tuple(sum(0 if m == mP else Q1[Q1_idx[(mP, m)]] if mP < m else Q2[Q2_idx[(mP, m)]] for mP in range(M)) % self.p for m in range(M))
+
+        # sub protocol 3, lines 22-29
+        eta_mul = await self.multiply(msgbase, *zip(*((eta[m], eta[mP]) for mP, m in combinations(range(M), 2))))
+        gamma = await self.multiply(msgbase, eta_mul,
+                                    tuple((Q_m[mP] - Q_m[m]) % self.p for mP, m in combinations(range(M), 2)))
+        gamma = tuple((1 - eta_mul_i + gamma_i) % self.p for eta_mul_i, gamma_i in zip(eta_mul, gamma))
+        r = await self.random_number(msgbase, len(gamma))
+        x = await self.multiply(msgbase, r, gamma)
+        x = await self.resolve(msgbase, x)
+        if any(x_i == 0 for x_i in x):
+            return False
+
+        return True
+
+
+    async def validate_copeland(self, msgbase: int, votes: Tuple[int, ...]):
+        def q(m1: int, m2: int):
+            if m1 == m2:
+                return 0
+            if m2 < m1:
+                return -q(m1=m2, m2=m1) % self.p
             return votes[m2 - m1 - 1 + m1 * M - m1 * (m1 + 1) // 2]
 
         M = len(self.election.candidates)
-        q_m = tuple(sum(gamma(m2, m1) if m2 < m1 else gamma(m1, m2) for m2 in range(M)) % self.p for m1 in range(M))
-        return await self.__validate_condorcer(msgbase, votes, q_m, False)
+        Q = tuple(tuple(q(m1, m2) for m2 in range(M)) for m1 in range(M))
+        return await self.__validate_condorcer(msgbase, Q)
 
     async def validate_maximin(self, msgbase: int, votes: Tuple[int, ...]):
         def gamma(m1: int, m2: int):
@@ -430,7 +445,7 @@ class MpcValidation(MpcBase):
         if election.selected_election_type == ElectionType.borda:
             raise NotImplementedError()
         if election.selected_election_type == ElectionType.copeland:
-            return M - 1
+            return M * (M - 1) // 2
         if election.selected_election_type == ElectionType.maximin:
             return M - 1
         raise NotImplementedError()
