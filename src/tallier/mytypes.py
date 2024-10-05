@@ -23,6 +23,13 @@ class Election(NamedTuple):
     p: int
     L: int
 
+    @property
+    def vote_vector_size(self) -> int:
+        M = len(self.candidates)
+        if self.selected_election_type in (ElectionType.copeland, ElectionType.maximin):
+            return M * (M - 1) // 2
+        return M
+
 
 class TallierAddress(NamedTuple):
     address: str

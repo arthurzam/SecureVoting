@@ -38,7 +38,6 @@
       };
 
       const table = document.getElementById("elections");
-      console.log(elections);
       elections.forEach(election => {
         const row = document.createElement('tr');
         row.appendChild(make_cell(make_label(election.name)));

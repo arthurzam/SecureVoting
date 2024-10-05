@@ -21,7 +21,6 @@
       };
       sock.onmessage = (event) => {
         const election = JSON.parse(event.data);
-        console.log(election);
         document.getElementById("id").value = election_id;
         document.getElementById("name").value = election.name;
         document.getElementById("email").value = election.manager_email;
