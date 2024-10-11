@@ -224,6 +224,16 @@ class MpcWinner(MpcBase):
         max_idx, _max_value = votes_idx[0]
         return await self.resolve(msgbase, max_idx)
 
+    async def min(self, msgbase: int, values: tuple[int, ...]) -> int:
+        async def __min(msgid: int, a: int, b: int) -> int:
+            # b + (a - b) * less(a, b)
+            return (b + await self.multiply(msgid, (a - b) % self.p, await self.less(msgid, a, b))) % self.p
+        assert len(values) > 1
+        while len(values) > 1:
+            values = tuple(await asyncio.gather(*(map(__min, count(msgbase, 3 * self.block_size), values[::2], values[1::2])))) + values[len(values)^1:]
+        assert len(values) == 1
+        return values[0]
+
     async def is_zero(self, msgid: int, a: int) -> int:
         n = self.p - 1
         result = 1
@@ -256,6 +266,17 @@ class MpcWinner(MpcBase):
 
         calc_width = (M - 1) * (1 + self.block_size)
         return tuple(await asyncio.gather(*map(single_score, count(msgbase, calc_width), range(M))))
+
+    async def maximin_scores(self, msgbase: int, M: int, votes: tuple[int, ...]) -> tuple[int, ...]:
+        def gamma(m1: int, m2: int): # m1 <= m2
+            if m1 == m2:
+                return 0
+            return votes[m2 - m1 - 1 + m1 * M - m1 * (m1 + 1) // 2]
+
+        width = 3 * self.block_size * ((M - 1) // 2)
+
+        values = [tuple(gamma(m, m2) for m2 in range(m+1, M)) + tuple(self.p + 1 - gamma(m2, m) for m2 in range(0, m)) for m in range(M)]
+        return tuple(await asyncio.gather(*map(self.min, count(msgbase, width), values)))
 
 
 class MpcValidation(MpcBase):

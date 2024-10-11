@@ -26,9 +26,9 @@ class QueueTallier(TallierConn):
             assert isinstance(a, list)
             if len(a) > 1:
                 return a.pop(0)
+            else:
                 del self.queue[msgid]
                 return a[0]
-                return self.queue.pop(msgid)[0]
         else:
             fut = asyncio.get_event_loop().create_future()
             self.queue[msgid] = fut
@@ -157,18 +157,18 @@ async def test_is_positive(clique, a):
     response = await asyncio.gather(*map(code, clique, shares))
     assert response == [expected] * len(clique)
 
-def build_ballot(scores: tuple[int, ...]):
+def build_ballot(scores: tuple[int, ...], is_maximin = False):
     for i, c1 in enumerate(scores):
         for c2 in scores[i+1:]:
             if c1 > c2:
                 yield 1
-            elif c1 == c2:
+            elif is_maximin or c1 == c2:
                 yield 0
             else:
                 yield p-1
 
-def build_ballot_shares(scores: tuple[int, ...]) -> tuple[tuple[int, ...], ...]:
-    return tuple(clean_gen_shamir(a, 3, 2, p) for a in build_ballot(scores))
+def build_ballot_shares(scores: tuple[int, ...], is_maximin = False) -> tuple[tuple[int, ...], ...]:
+    return tuple(clean_gen_shamir(a, 3, 2, p) for a in build_ballot(scores, is_maximin))
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("ballot", "expected"), (
@@ -201,6 +201,22 @@ async def test_copeland_winner(clique_3, ballot, expected):
     async def code(t: MpcWinner, *votes: int) -> int:
         scores = await t.copeland_scores(0, len(ballot), alpha_s, alpha_t, votes)
         return await t.max(0, scores)
+
+    response = await asyncio.gather(*map(code, clique_3, *ballot_shares))
+    assert response == [expected] * len(clique_3)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("ballot", "expected"), (
+    pytest.param((3, 2, 1), (1, 0, 0), id="ballot=3,2,1"),
+    pytest.param((5, 3, 3), (1, 0, 0), id="ballot=5,3,3"),
+    pytest.param((4, 2, 3, 1), (1, 0, 0, 0), id="ballot=4,2,3,1"),
+))
+async def test_maximin_score(clique_3, ballot, expected):
+    ballot_shares = build_ballot_shares(ballot, is_maximin=True)
+
+    async def code(t: MpcWinner, *votes: int) -> tuple[int, ...]:
+        scores = await t.maximin_scores(0, len(ballot), votes)
+        return tuple(await asyncio.gather(*map(t.resolve, count(1), scores)))
 
     response = await asyncio.gather(*map(code, clique_3, *ballot_shares))
     assert response == [expected] * len(clique_3)
