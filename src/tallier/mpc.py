@@ -177,17 +177,16 @@ class MpcWinner(MpcBase):
         h_i = await asyncio.gather(*map(self.multiply, count(msgid), e_i, b_i))
         return sum(h_i) % self.p
 
-    async def random_number_bits(self, msgid: int) -> tuple[int, ...]:  # Joint Random Number Bitwise-Sharing
+    async def random_number_bits(self, msgid: int, bits_count: int) -> tuple[int, ...]:  # Joint Random Number Bitwise-Sharing
         while True:
-            bits_count = math.ceil(math.log2(self.p))
             r_i = await asyncio.gather(*map(self.random_bit, range(msgid, msgid + bits_count)))
-            p_i = [int(digit) for digit in reversed(bin(self.p)[2:])]
+            p_i = tuple(int(digit) for digit in reversed(bin(self.p)[2:]))
             check_bit = await self.resolve(msgid, await self.less_bitwise(msgid, r_i, p_i))
             if check_bit == 1:
                 return tuple(r_i)
 
     async def is_odd(self, msgid: int, x: int) -> int:  # LSB of number
-        r_i = await self.random_number_bits(msgid)
+        r_i = await self.random_number_bits(msgid, bits_count=math.ceil(math.log2(self.p)))
         r = sum(bit * 2 ** idx for idx, bit in enumerate(r_i)) % self.p
         c = await self.resolve(msgid, (x + r) % self.p)
         d = r_i[0] if c % 2 == 0 else (1 - r_i[0]) % self.p
@@ -216,12 +215,14 @@ class MpcWinner(MpcBase):
         return (i1 + i2) % self.p, (v1 + v2) % self.p
 
     async def max(self, msgbase: int, votes: Sequence[int]) -> int:
-        if len(votes) == 1:
+        if len(votes) <= 1:
             return 0
         votes_idx = tuple(enumerate(votes))
         while len(votes_idx) > 1:
             votes_idx = tuple(await asyncio.gather(*(map(self.__max_index, count(msgbase, 3 * self.block_size), votes_idx[::2], votes_idx[1::2])))) + votes_idx[len(votes_idx)^1:]
-        return await self.resolve(msgbase, votes_idx[0][0])
+        assert len(votes_idx) == 1
+        max_idx, _max_value = votes_idx[0]
+        return await self.resolve(msgbase, max_idx)
 
     async def is_zero(self, msgid: int, a: int) -> int:
         n = self.p - 1

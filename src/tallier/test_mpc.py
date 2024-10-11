@@ -22,10 +22,12 @@ class QueueTallier(TallierConn):
         assert self.writer.empty(), "Queue should be empty"
 
     async def read(self, msgid: int) -> tuple[int, ...]:
-        if msgid in self.queue:
-            if len(a := self.queue[msgid]) > 1:
+        if (a := self.queue.get(msgid)) is not None:
+            assert isinstance(a, list)
+            if len(a) > 1:
                 return a.pop(0)
-            else:
+                del self.queue[msgid]
+                return a[0]
                 return self.queue.pop(msgid)[0]
         else:
             fut = asyncio.get_event_loop().create_future()
@@ -45,7 +47,8 @@ class QueueTallier(TallierConn):
                 if isinstance(a := self.queue.setdefault(msgid, []), list):
                     a.append(tuple(share))
                 else:
-                    self.queue.pop(msgid).set_result(tuple(share))
+                    del self.queue[msgid]
+                    a.set_result(tuple(share))
         except asyncio.CancelledError:
             await self.close()
 
@@ -124,7 +127,8 @@ async def test_multiply_rnd(clique):
 async def test_random_number(clique):
     async def code(t: MpcWinner) -> tuple[int, int]:
         a, b = await asyncio.gather(t.random_number(0), t.random_number(1))
-        return tuple(await asyncio.gather(t.resolve(0, a), t.resolve(1, b)))
+        a, b = await asyncio.gather(t.resolve(0, a), t.resolve(1, b))
+        return a, b
 
     response = await asyncio.gather(*map(code, clique))
     assert response[0] == response[1] == response[2]

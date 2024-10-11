@@ -43,11 +43,13 @@ class Tallier(TallierConn):
             logger.error("MultiTallier::close", exc_info=e)
 
     async def read(self, msgid: int) -> tuple[int, ...]:
-        if msgid in self.queue:
-            if len(a := self.queue[msgid]) > 1:
+        if (a := self.queue.get(msgid)) is not None:
+            assert isinstance(a, list)
+            if len(a) > 1:
                 return (a.pop(0), )
             else:
-                return (self.queue.pop(msgid)[0], )
+                del self.queue[msgid]
+                return (a[0], )
         else:
             fut = asyncio.get_event_loop().create_future()
             self.queue[msgid] = fut
@@ -68,7 +70,8 @@ class Tallier(TallierConn):
                 if isinstance(a := self.queue.setdefault(msgid, []), list):
                     a.append(share)
                 else:
-                    self.queue.pop(msgid).set_result(share)
+                    del self.queue[msgid]
+                    a.set_result(share)
         except asyncio.CancelledError:
             await self.close()
 
@@ -88,11 +91,13 @@ class MultiTallier(TallierConn):
             logger.error("MultiTallier::close", exc_info=e)
 
     async def read(self, msgid: int) -> tuple[int, ...]:
-        if msgid in self.queue:
-            if len(a := self.queue[msgid]) > 1:
+        if (a := self.queue.get(msgid)) is not None:
+            assert isinstance(a, list)
+            if len(a) > 1:
                 return a.pop(0)
             else:
-                return self.queue.pop(msgid)[0]
+                del self.queue[msgid]
+                return a[0]
         else:
             fut = asyncio.get_event_loop().create_future()
             self.queue[msgid] = fut
@@ -110,7 +115,8 @@ class MultiTallier(TallierConn):
                 if isinstance(a := self.queue.setdefault(msgid, []), list):
                     a.append(tuple(share))
                 else:
-                    self.queue.pop(msgid).set_result(tuple(share))
+                    del self.queue[msgid]
+                    a.set_result(tuple(share))
         except asyncio.CancelledError:
             await self.close()
 
