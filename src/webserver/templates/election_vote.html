@@ -211,12 +211,11 @@
         throw new Error(`Unset value for ${unsetCandidate}`);
       }
 
-      const isMaximin = election_type == 7;
       const selections = config.candidates.map((_, idx) => parseInt(document.querySelector(`input[name=value${idx}]:checked`).getAttribute('value')));
       return selections.flatMap((c1, i) => selections.slice(i+1).map((c2) => {
         if (c1 < c2) {
           return 1;
-        } else if (isMaximin || c1 === c2) {
+        } else if (c1 === c2) {
           return 0;
         }
         return -1;

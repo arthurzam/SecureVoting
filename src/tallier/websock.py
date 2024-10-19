@@ -141,6 +141,8 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                 validate = await running_elections[election.election_id].validate(msg_id, votes)
                 if not validate:
                     logger.warning("Invalid vote for %s in election %s", email, election.election_id)
+                if validate and election.selected_election_type == ElectionType.maximin:
+                    votes = await running_elections[election.election_id].convert_copeland_to_maximin(msg_id, votes)
                 votes_scale = int(validate) * await computation_mpc.multiply(msg_id, db_status, not_abstain)
                 res = await computation_mpc.resolve(msg_id, votes_scale)
                 new_votes = await running_elections[election.election_id].multiply(msg_id, votes, tuple(votes_scale for _ in votes))

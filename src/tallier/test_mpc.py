@@ -286,3 +286,14 @@ class TestMpcValidation:
 
         response = await asyncio.gather(*map(code, clique, shares))
         assert response == [False] * len(clique)
+
+    @pytest.mark.parametrize("ballot", (pytest.param(s, id=f"scores={s}") for s in product(range(copeland_candidates), repeat=copeland_candidates)))
+    async def test_convert_copeland_to_maximin(self, clique, ballot):
+        shares = transpose(build_ballot_shares(scores=ballot, is_maximin=False))
+        expected = tuple(build_ballot(scores=ballot, is_maximin=True))
+
+        async def code(t: MpcValidation, x: tuple[int, ...]) -> bool:
+            return await t.resolve(0, await t.convert_copeland_to_maximin(0, x))
+
+        response = await asyncio.gather(*map(code, clique, shares))
+        assert response == [expected] * len(clique)

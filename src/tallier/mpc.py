@@ -363,10 +363,11 @@ class MpcValidation(MpcBase):
             return (all(await asyncio.gather(*map(check_pair, count(msgid), combinations(votes, 2)))) or
                     all(await asyncio.gather(*map(check_pair, count(msgid), combinations(votes, 2)))))
 
-        return all(await asyncio.gather(self.validate_range(msgbase, votes, self.M - 1),
-                                        two_stage_permute(msgbase + self.M)))
+        M = len(self.election.candidates)
+        return all(await asyncio.gather(self.validate_range(msgbase, votes, max_value=M - 1),
+                                        two_stage_permute(msgbase + M)))
 
-    async def __validate_condorcer(self, msgbase: int, Q: tuple[tuple[int, ...], ...]):
+    async def validate_copeland(self, msgbase: int, votes: Tuple[int, ...]):
         M = len(self.election.candidates)
         def pos(shares: tuple[int, ...], m1: int, m2: int):
             if m1 == m2:
@@ -374,6 +375,8 @@ class MpcValidation(MpcBase):
             if m2 < m1:
                 return -pos(shares, m1=m2, m2=m1) % self.p
             return shares[m2 - m1 - 1 + m1 * M - m1 * (m1 + 1) // 2]
+
+        Q = tuple(tuple(pos(votes, m1, m2) for m2 in range(M)) for m1 in range(M))
 
         # sub protocol 3, lines 6-10
         x = await self.multiply(msgbase, tuple(Q[mP][m] for mP, m in combinations(range(M), 2)),
@@ -416,28 +419,9 @@ class MpcValidation(MpcBase):
 
         return True
 
-
-    async def validate_copeland(self, msgbase: int, votes: Tuple[int, ...]):
-        def q(m1: int, m2: int):
-            if m1 == m2:
-                return 0
-            if m2 < m1:
-                return -q(m1=m2, m2=m1) % self.p
-            return votes[m2 - m1 - 1 + m1 * M - m1 * (m1 + 1) // 2]
-
-        M = len(self.election.candidates)
-        Q = tuple(tuple(q(m1, m2) for m2 in range(M)) for m1 in range(M))
-        return await self.__validate_condorcer(msgbase, Q)
-
-    async def validate_maximin(self, msgbase: int, votes: Tuple[int, ...]):
-        def gamma(m1: int, m2: int):
-            if m1 == m2:
-                return 0
-            return votes[m2 - m1 - 1 + m1 * M - m1 * (m1 + 1) // 2]
-
-        M = len(self.election.candidates)
-        q_m = tuple((sum(gamma(m2, m1) if m2 < m1 else gamma(m1, m2) for m2 in range(M)) + M - m1) % self.p for m1 in range(M))
-        return await self.__validate_condorcer(msgbase, votes, q_m, True)
+    async def convert_copeland_to_maximin(self, msgbase: int, votes: Tuple[int, ...]) -> Tuple[int, ...]:
+        xi = await self.is_zero(msgbase, tuple((x + 1) % self.p for x in votes))
+        return tuple((a + b) % self.p for a, b in zip(votes, xi))
 
     def validate(self, msgid: int, votes: Tuple[int, ...]) -> Awaitable[bool]:
         if self.election.selected_election_type == ElectionType.approval:
@@ -447,13 +431,13 @@ class MpcValidation(MpcBase):
         if self.election.selected_election_type == ElectionType.veto:
             return self.validate_veto(msgid, votes)
         if self.election.selected_election_type == ElectionType.range:
-            return self.validate_range(msgid, votes)
+            return self.validate_range(msgid, votes, max_value=self.election.L)
         if self.election.selected_election_type == ElectionType.borda:
             return self.validate_borda(msgid, votes)
         if self.election.selected_election_type == ElectionType.copeland:
             return self.validate_copeland(msgid, votes)
         if self.election.selected_election_type == ElectionType.maximin:
-            return self.validate_maximin(msgid, votes)
+            return self.validate_copeland(msgid, votes)
         raise NotImplementedError()
 
     @staticmethod
@@ -472,5 +456,5 @@ class MpcValidation(MpcBase):
         if election.selected_election_type == ElectionType.copeland:
             return M * (M - 1) // 2
         if election.selected_election_type == ElectionType.maximin:
-            return M - 1
+            return M * (M - 1) // 2
         raise NotImplementedError()
