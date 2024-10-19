@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import abc
 import asyncio
 import logging
 import math
@@ -27,16 +28,20 @@ import utils
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-class TallierConn:
+class TallierConn(metaclass=abc.ABCMeta):
+    @abc.abstractmethod
     async def close(self):
         raise NotImplementedError()
 
+    @abc.abstractmethod
     async def read(self, msgid: int) -> Tuple[int, ...]:
         raise NotImplementedError()
 
+    @abc.abstractmethod
     async def write(self, msgid: int, values: Tuple[int, ...]):
         raise NotImplementedError()
 
+    @abc.abstractmethod
     async def receive_loop(self):
         raise NotImplementedError()
 
