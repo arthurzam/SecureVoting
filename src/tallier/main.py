@@ -1,5 +1,4 @@
 from pathlib import Path
-from uuid import UUID
 import asyncio
 import signal
 import sys

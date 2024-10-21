@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from uuid import UUID
 
 import websockets as ws
@@ -13,6 +14,8 @@ from mytypes import Election, ElectionType
 
 running_elections: dict[UUID, MpcValidation] = {}
 computation_mpc: MpcWinner | None = None
+
+enable_mail = os.getenv("MAIL_DISABLED") != "1"
 
 def get_user_id(email: str):
     from hashlib import sha1
@@ -40,7 +43,7 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                 code = get_user_id(message['email'])
                 res = await db.register(message['email'], message['name'], code)
                 logger.info('register %s <%s>: db result is %s', message['name'], message['email'], 'successful' if res else 'unsuccessful')
-                if res and tallier_id == 0:
+                if res and tallier_id == 0 and enable_mail:
                     from mail import register_email
                     register_email(message['email'], message['name'], code)
                 return await websocket.close(code=(1000 if res else 1008))
@@ -90,7 +93,7 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
 
                 await db.start_election(election)
                 running_elections[election.election_id] = await manager.start_election_voting(election, wanted_talliers, tallier_id)
-                if tallier_id == 0:
+                if tallier_id == 0 and enable_mail:
                     from mail import start_election
                     manager_name, voters = await db.get_election_emails(election.election_id)
                     start_election(manager_name, election, voters)
@@ -107,11 +110,11 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                     await running_elections.pop(election.election_id).close()
                     async def calc_winners():
                         winners = await manager.calc_winners(election, wanted_talliers, tallier_id, vote_vector)
-                        if tallier_id == 0:
+                        if tallier_id == 0 and enable_mail:
                             from mail import stop_election
                             manager_name, voters = await db.get_election_emails(election.election_id)
                             stop_election(manager_name, election, voters, winners)
-                            await db.finish_election(election, winners)
+                        await db.finish_election(election, winners)
                     asyncio.ensure_future(calc_winners())
                     return await websocket.close(code=1000)
                 else:

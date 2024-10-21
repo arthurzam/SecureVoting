@@ -176,7 +176,6 @@ class DBconn:
 
     async def vote(self, election: mytypes.Election, ballot: tuple[int, ...], email: str, vote_status: int) -> None:
         async with self.conn.transaction():
-            logger.info(f"voting with {ballot}")
             await self.conn.execute("""
                 UPDATE running_election
                 SET vote_vector = sum_int_arrays($2::int[], vote_vector, $3)

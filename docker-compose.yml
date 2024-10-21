@@ -11,8 +11,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
-    ports:
-      - "127.0.0.1:5432:5432"
 
   avote1:
     command: ["1"]
@@ -27,7 +25,9 @@ services:
       - source: avote1_key.pem
         target: certfile.pem
     environment:
-      TALLIERS_INTERNAL: ${TALLIERS_INTERNAL}
+      TALLIERS_INTERNAL: "${TALLIERS_INTERNAL}"
+      WEBSITE_URL: "${WEBSITE_URL}"
+      MAIL_DISABLED: "${MAIL_DISABLED}"
     ports:
       - "18080:18080"
       - "8080:8080"
@@ -45,7 +45,9 @@ services:
       - source: avote2_key.pem
         target: certfile.pem
     environment:
-      TALLIERS_INTERNAL: ${TALLIERS_INTERNAL}
+      TALLIERS_INTERNAL: "${TALLIERS_INTERNAL}"
+      WEBSITE_URL: "${WEBSITE_URL}"
+      MAIL_DISABLED: "${MAIL_DISABLED}"
     ports:
       - "18081:18080"
       - "8081:8080"
@@ -58,6 +60,8 @@ services:
     build: src/tallier
     environment:
       TALLIERS_INTERNAL: "${TALLIERS_INTERNAL}"
+      WEBSITE_URL: "${WEBSITE_URL}"
+      MAIL_DISABLED: "${MAIL_DISABLED}"
     secrets:
       - avote_ca.crt
       - source: avote3_key.pem
@@ -79,6 +83,9 @@ services:
   mailserver:
     image: namshi/smtp
     restart: always
+    environment:
+      GMAIL_USER: "${GMAIL_USER}"
+      GMAIL_PASSWORD: "${GMAIL_PASSWORD}"
 
 secrets:
   avote_ca.crt:
