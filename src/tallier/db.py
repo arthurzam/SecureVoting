@@ -98,15 +98,18 @@ class DBconn:
             values = await self.conn.fetchrow("""
                 SELECT name, manager_email, selected_election_type AS rule, candidates, winner_count, p, l,
                     ARRAY_AGG(election_votes.email) AS voters,
-                    COUNT(election_votes.email) FILTER(WHERE election_votes.vote_state != 2147483648) AS voted
-                FROM elections JOIN election_votes USING (election_id)
+                    COUNT(election_votes.email) FILTER(WHERE election_votes.vote_state != 2147483648) AS voted,
+                    finished_election.winners AS winners
+                FROM elections
+                LEFT JOIN election_votes USING (election_id)
+                LEFT JOIN finished_election USING (election_id)
                 WHERE election_id = $1
-                GROUP BY election_id
+                GROUP BY election_id, finished_election.winners
             """, election_id)
             if values is None:
                 raise ValueError()
             return {
-                k: values[k] for k in ("name", "manager_email", "rule", "candidates", "winner_count", "p", "l", "voters", "voted")
+                k: values[k] for k in ("name", "manager_email", "rule", "candidates", "winner_count", "p", "l", "voters", "voted", "winners")
             } | {"election_id": str(election_id)}
 
     async def get_election_emails(self, election_id: uuid.UUID) -> tuple[str, tuple[str, ...]]:

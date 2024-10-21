@@ -28,6 +28,12 @@
         document.getElementById("candidates").value = election.candidates.join('\n');
         document.getElementById("voters_lb").appendChild(document.createTextNode(`Voters: ${election.voted}/${election.voters.length} voted`));
         document.getElementById("voters").value = election.voters.join('\n');
+        if (election.winners) {
+          document.getElementById("winners_lb").appendChild(document.createTextNode(`Winners: ${election.winners.length}`));
+          document.getElementById("winners").value = election.winners.join('\n');
+        } else {
+          document.getElementById("winners_div").style.display = "none";
+        }
       };
     }
   }
@@ -58,6 +64,11 @@
   <div>
     <label for="voters" id="voters_lb"></label><br />
     <textarea id="voters" style="width: 180px; height: 6em;" disabled ></textarea>
+  </div>
+
+  <div id="winners_div">
+    <label for="winners" id="winners_lb"></label><br />
+    <textarea id="winners" style="width: 180px; height: 6em;" disabled ></textarea>
   </div>
 </form>
 <script>
