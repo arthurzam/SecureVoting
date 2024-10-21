@@ -79,6 +79,7 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
                     return await websocket.close(code=1008)
                 candidates = clean_user_array(message['candidates'])
                 voters = clean_user_array(message['voters'])
+                assert 0 < message['K'] <= len(candidates), f"Invalid K={message['K']}"
                 election = Election(UUID(message['id']), message['name'], message['email'], ElectionType(message['rule']), candidates,
                                     message['K'], message['p'], message['L'])
                 if len(election.candidates) == 0 or len(message['voters']) == 0:

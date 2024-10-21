@@ -44,7 +44,7 @@ class Tallier(TallierConn):
 
     async def read(self, msgid: int) -> tuple[int, ...]:
         if (a := self.queue.get(msgid)) is not None:
-            assert isinstance(a, list)
+            assert isinstance(a, list), f"Expected list, got {type(a)}"
             if len(a) > 1:
                 return (a.pop(0), )
             else:
@@ -92,7 +92,7 @@ class MultiTallier(TallierConn):
 
     async def read(self, msgid: int) -> tuple[int, ...]:
         if (a := self.queue.get(msgid)) is not None:
-            assert isinstance(a, list)
+            assert isinstance(a, list), f"Expected list, got {type(a)}"
             if len(a) > 1:
                 return a.pop(0)
             else:

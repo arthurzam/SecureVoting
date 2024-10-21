@@ -131,7 +131,7 @@ class DBconn:
                 await self.conn.execute("""
                     INSERT INTO running_election(election_id, vote_vector)
                     VALUES ($1, $2)
-                """, election.election_id, [0] * len(election.candidates))
+                """, election.election_id, [0] * election.vote_vector_size)
             return True
         except asyncpg.UniqueViolationError:
             return False
