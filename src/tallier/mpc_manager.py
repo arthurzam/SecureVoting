@@ -21,7 +21,7 @@ from uuid import UUID
 from pathlib import Path
 
 from mpc import MpcValidation, MpcWinner, TallierConn, TallierConnFactory
-from mytypes import Election, TallierAddress
+from mytypes import Election, ElectionType, TallierAddress
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -133,7 +133,7 @@ def server_ssl_key(certfile: Path) -> ssl.SSLContext:
     return context
 
 @dataclass
-class MpcWaitItem():
+class MpcWaitItem:
     self_id: int
     election_id: UUID
 
@@ -249,6 +249,11 @@ class TallierManager:
         talliers = await self.start_clique(election.election_id, wanted_talliers, self_id, tallier_factory)
         mpc = MpcWinner(election, talliers)
         try:
+            match election.selected_election_type:
+                case ElectionType.copeland:
+                    votes_vector = await mpc.copeland_scores(0, len(election.candidates), 1, 2, votes_vector)
+                case ElectionType.maximin:
+                    votes_vector = await mpc.maximin_scores(0, len(election.candidates), votes_vector)
             votes, names, winners = list(votes_vector), list(election.candidates), []
             for i in range(election.winner_count):
                 logger.info('phase %d', i)
