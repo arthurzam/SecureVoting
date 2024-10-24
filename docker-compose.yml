@@ -14,6 +14,7 @@ services:
 
   avote1:
     command: ["1"]
+    stop_signal: SIGINT
     depends_on:
       db:
         condition: service_healthy
@@ -34,6 +35,7 @@ services:
 
   avote2:
     command: ["2"]
+    stop_signal: SIGINT
     depends_on:
       db:
         condition: service_healthy
@@ -54,6 +56,7 @@ services:
 
   avote3:
     command: ["3"]
+    stop_signal: SIGINT
     depends_on:
       db:
         condition: service_healthy
@@ -73,6 +76,7 @@ services:
   webserver:
     image: avote_webserver
     build: src/webserver
+    stop_signal: SIGINT
     env_file:
       - .env
     environment:

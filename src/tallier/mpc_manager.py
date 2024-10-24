@@ -63,7 +63,6 @@ class Tallier(TallierConn):
     async def receive_loop(self):
         if self.reader is None:
             return
-        logger.info("receive_loop")
         try:
             while True:
                 msgid, share = self.struct.unpack(await self.reader.readexactly(self.struct.size))

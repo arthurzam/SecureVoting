@@ -208,7 +208,7 @@ async def test_copeland_winner(clique_3, ballot, expected):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("ballot", "expected"), (
     pytest.param((3, 2, 1), (1, 0, 0), id="ballot=3,2,1"),
-    pytest.param((5, 3, 3), (1, 0, 0), id="ballot=5,3,3"),
+    pytest.param((3, 5, 3), (0, 1, 0), id="ballot=3,5,3"),
     pytest.param((4, 2, 3, 1), (1, 0, 0, 0), id="ballot=4,2,3,1"),
 ))
 async def test_maximin_score(clique_3, ballot, expected):
