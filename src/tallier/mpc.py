@@ -273,14 +273,19 @@ class MpcWinner(MpcBase):
         return tuple(await asyncio.gather(*map(single_score, count(msgbase, calc_width), range(M))))
 
     async def maximin_scores(self, msgbase: int, M: int, votes: tuple[int, ...]) -> tuple[int, ...]:
-        def gamma(m1: int, m2: int): # m1 <= m2
+        def gamma(m1: int, m2: int):
             if m1 == m2:
                 return 0
+            if m1 > m2:
+                return (self.p + 1 - gamma(m1=m2, m2=m1)) % self.p # gamma(m2, m1) + gamma(m1, m2) = 1
             return votes[m2 - m1 - 1 + m1 * M - m1 * (m1 + 1) // 2]
 
         width = 3 * self.block_size * ((M - 1) // 2)
 
-        values = [tuple(gamma(m, m2) for m2 in range(m+1, M)) + tuple(self.p + 1 - gamma(m2, m) for m2 in range(0, m)) for m in range(M)]
+        values = [
+            tuple(gamma(m, m2) for m2 in range(0, M) if m2 != m)
+            for m in range(M)
+        ]
         return tuple(await asyncio.gather(*map(self.min, count(msgbase, width), values)))
 
 

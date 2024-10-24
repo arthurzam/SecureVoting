@@ -51,7 +51,7 @@
       name: document.getElementById("name").value,
       id: election_id,
       candidates: document.getElementById("candidates").value.split('\n').map(s => s.trim()),
-      K: 1,
+      K: parseInt(document.getElementById("winners").value),
       p: 2147483647,
       L: 1,
       rule: parseInt(document.getElementById("form").elements["rule"].value),
