@@ -13,15 +13,20 @@
 # limitations under the License.
 
 import operator
-from functools import reduce
+from functools import cache, reduce
 from itertools import starmap
 from random import choices
 from typing import TypeVar, Iterable
 
 
+@cache
+def __gen_shamir_coefficients(key_count: int, threshold: int, p: int):
+    return tuple(tuple(pow(i, x, p) for x in range(threshold)) for i in range(1, key_count + 1))
+
+
 def clean_gen_shamir(value: int, key_count: int, threshold: int, p: int) -> tuple[int, ...]:
     a_i = [value] + choices(range(p), k=threshold - 1)
-    return tuple(sum(a * pow(x + 1, i, p) for i, a in enumerate(a_i)) % p for x in range(key_count))
+    return tuple(sum(a * b for a, b in zip(a_i, b_i)) % p for b_i in __gen_shamir_coefficients(key_count, threshold, p))
 
 
 def gen_shamir(value: int, key_count: int, threshold: int, p: int) -> tuple[tuple[int, int], ...]:
