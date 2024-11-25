@@ -211,8 +211,12 @@ class MpcWinner(MpcBase):
         d = (x + y - c) % self.p
         return (await self.multiply(msgid, w, (d - c) % self.p) + 1 - d) % self.p
 
+    async def less_optimized(self, msgid: int, a: int, b: int) -> int:  # Comparison, a and b are known to be less than half p
+        y = await self.less_middle(msgid, (a - b) % self.p)
+        return (1 - y) % self.p
+
     async def __max_index(self, msgid: int, a: tuple[int, int], b: tuple[int, int]) -> tuple[int, int]:
-        c = await self.less(msgid, a[1], b[1])
+        c = await self.less_optimized(msgid, a[1], b[1])
         v1, i1, v2, i2 = await asyncio.gather(self.multiply(msgid, c, b[1]),
                                               self.multiply(msgid + 1, c, b[0]),
                                               self.multiply(msgid + 2, (1 - c) % self.p, a[1]),
@@ -224,7 +228,7 @@ class MpcWinner(MpcBase):
             return 0
         votes_idx = tuple(enumerate(votes))
         while len(votes_idx) > 1:
-            votes_idx = tuple(await asyncio.gather(*(map(self.__max_index, count(msgbase, 3 * self.block_size), votes_idx[::2], votes_idx[1::2])))) + votes_idx[len(votes_idx)^1:]
+            votes_idx = tuple(await asyncio.gather(*(map(self.__max_index, count(msgbase, self.block_size), votes_idx[::2], votes_idx[1::2])))) + votes_idx[len(votes_idx)^1:]
         assert len(votes_idx) == 1
         max_idx, _max_value = votes_idx[0]
         return await self.resolve(msgbase, max_idx)
@@ -232,10 +236,10 @@ class MpcWinner(MpcBase):
     async def min(self, msgbase: int, values: tuple[int, ...]) -> int:
         async def __min(msgid: int, a: int, b: int) -> int:
             # b + (a - b) * less(a, b)
-            return (b + await self.multiply(msgid, (a - b) % self.p, await self.less(msgid, a, b))) % self.p
+            return (b + await self.multiply(msgid, (a - b) % self.p, await self.less_optimized(msgid, a, b))) % self.p
         assert len(values) > 1
         while len(values) > 1:
-            values = tuple(await asyncio.gather(*(map(__min, count(msgbase, 3 * self.block_size), values[::2], values[1::2])))) + values[len(values)^1:]
+            values = tuple(await asyncio.gather(*(map(__min, count(msgbase, self.block_size), values[::2], values[1::2])))) + values[len(values)^1:]
         assert len(values) == 1
         return values[0]
 
