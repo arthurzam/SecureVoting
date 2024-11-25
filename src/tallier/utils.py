@@ -34,18 +34,21 @@ def gen_shamir(value: int, key_count: int, threshold: int, p: int) -> tuple[tupl
     return tuple((x, sum((a * x ** i for i, a in enumerate(a_i))) % p) for x in range(1, key_count + 1))
 
 
-def resolve(keys: tuple[int, ...], p: int):
-    k = tuple(enumerate(keys, start=1))
-
-    def l(x_i, y_i):
+@cache
+def __resolve_coefficients(keys_count: int, p: int):
+    result = []
+    for i in range(1, keys_count + 1):
         c1, c2 = 1, 1
-        for x_j, _ in k:
-            if x_j != x_i:
-                c1 *= x_j
-                c2 *= ((x_j - x_i) % p)
-        return (c1 * pow(c2, -1, p) * y_i) % p
+        for j in range(1, keys_count + 1):
+            if j != i:
+                c1 *= j
+                c2 *= ((j - i) % p)
+        result.append((c1 * pow(c2, -1, p)) % p)
+    return tuple(result)
 
-    return sum(starmap(l, k)) % p
+
+def resolve(shares: tuple[int, ...], p: int):
+    return sum((s * w) % p for s, w in zip(shares, __resolve_coefficients(len(shares), p))) % p
 
 
 def inverse(a: list[list[int]], p: int):
