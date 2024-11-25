@@ -167,8 +167,8 @@ def build_ballot(scores: tuple[int, ...], is_maximin = False):
             else:
                 yield p-1
 
-def build_ballot_shares(scores: tuple[int, ...], is_maximin = False) -> tuple[tuple[int, ...], ...]:
-    return tuple(clean_gen_shamir(a, 3, 2, p) for a in build_ballot(scores, is_maximin))
+def build_ballot_shares(scores: tuple[int, ...], clique, is_maximin = False) -> tuple[tuple[int, ...], ...]:
+    return tuple(clean_gen_shamir(a, len(clique), (len(clique) + 1) // 2, p) for a in build_ballot(scores, is_maximin))
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("ballot", "expected"), (
@@ -176,16 +176,16 @@ def build_ballot_shares(scores: tuple[int, ...], is_maximin = False) -> tuple[tu
     pytest.param((5, 3, 3), (4, 1, 1), id="ballot=5,3,3"),
     pytest.param((4, 2, 3, 1), (6, 2, 4, 0), id="ballot=4,2,3,1"),
 ))
-async def test_copeland_score(clique_3, ballot, expected):
+async def test_copeland_score(clique, ballot, expected):
     alpha_s, alpha_t = 1, 2
-    ballot_shares = build_ballot_shares(ballot)
+    ballot_shares = build_ballot_shares(ballot, clique)
 
     async def code(t: MpcWinner, *votes: int) -> tuple[int, ...]:
         scores = await t.copeland_scores(0, len(ballot), alpha_s, alpha_t, votes)
         return tuple(await asyncio.gather(*map(t.resolve, count(1), scores)))
 
-    response = await asyncio.gather(*map(code, clique_3, *ballot_shares))
-    assert response == [expected] * len(clique_3)
+    response = await asyncio.gather(*map(code, clique, *ballot_shares))
+    assert response == [expected] * len(clique)
 
 
 @pytest.mark.asyncio
@@ -194,16 +194,16 @@ async def test_copeland_score(clique_3, ballot, expected):
     pytest.param((5, 3, 3), 0, id="ballot=5,3,3"),
     pytest.param((2, 4, 3, 1), 1, id="ballot=2,4,3,1"),
 ))
-async def test_copeland_winner(clique_3, ballot, expected):
+async def test_copeland_winner(clique, ballot, expected):
     alpha_s, alpha_t = 1, 2
-    ballot_shares = build_ballot_shares(ballot)
+    ballot_shares = build_ballot_shares(ballot, clique)
 
     async def code(t: MpcWinner, *votes: int) -> int:
         scores = await t.copeland_scores(0, len(ballot), alpha_s, alpha_t, votes)
         return await t.max(0, scores)
 
-    response = await asyncio.gather(*map(code, clique_3, *ballot_shares))
-    assert response == [expected] * len(clique_3)
+    response = await asyncio.gather(*map(code, clique, *ballot_shares))
+    assert response == [expected] * len(clique)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("ballot", "expected"), (
@@ -211,15 +211,15 @@ async def test_copeland_winner(clique_3, ballot, expected):
     pytest.param((3, 5, 3), (0, 1, 0), id="ballot=3,5,3"),
     pytest.param((4, 2, 3, 1), (1, 0, 0, 0), id="ballot=4,2,3,1"),
 ))
-async def test_maximin_score(clique_3, ballot, expected):
-    ballot_shares = build_ballot_shares(ballot, is_maximin=True)
+async def test_maximin_score(clique, ballot, expected):
+    ballot_shares = build_ballot_shares(ballot, clique, is_maximin=True)
 
     async def code(t: MpcWinner, *votes: int) -> tuple[int, ...]:
         scores = await t.maximin_scores(0, len(ballot), votes)
         return tuple(await asyncio.gather(*map(t.resolve, count(1), scores)))
 
-    response = await asyncio.gather(*map(code, clique_3, *ballot_shares))
-    assert response == [expected] * len(clique_3)
+    response = await asyncio.gather(*map(code, clique, *ballot_shares))
+    assert response == [expected] * len(clique)
 
 
 @pytest.mark.asyncio
@@ -289,7 +289,7 @@ class TestMpcValidation:
 
     @pytest.mark.parametrize("ballot", (pytest.param(s, id=f"scores={s}") for s in product(range(copeland_candidates), repeat=copeland_candidates)))
     async def test_convert_copeland_to_maximin(self, clique, ballot):
-        shares = transpose(build_ballot_shares(scores=ballot, is_maximin=False))
+        shares = transpose(build_ballot_shares(scores=ballot, clique=clique, is_maximin=False))
         expected = tuple(build_ballot(scores=ballot, is_maximin=True))
 
         async def code(t: MpcValidation, x: tuple[int, ...]) -> bool:
