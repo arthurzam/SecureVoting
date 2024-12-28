@@ -3,6 +3,7 @@ import string
 from itertools import count, product
 from random import randint
 from struct import Struct
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -54,7 +55,7 @@ class QueueTallier(TallierConn):
 
 
 p = 2 ** 31 - 1
-mock_election = Election(None, "Arthur", "a@a.com", ElectionType.approval, ("Alice", "Bob", "Charlie"), 1, p, 5)
+mock_election = Election(uuid4(), "Arthur", "a@a.com", ElectionType.approval, ("Alice", "Bob", "Charlie"), 1, p, 5)
 
 
 def generate_clique_talliers(clique_size: int, tallier_size: int):
@@ -89,7 +90,8 @@ async def test_resolve(clique_3):
     shares_6 = (934163148, 1868326290, 655005785)
 
     async def code(t: MpcWinner, a: int, b: int) -> tuple[int, int]:
-        return tuple(await asyncio.gather(t.resolve(0, a), t.resolve(1, b)))
+        a, b = await asyncio.gather(t.resolve(0, a), t.resolve(1, b))
+        return a, b
 
     response = await asyncio.gather(*map(code, clique_3, shares_5, shares_6))
     assert response == [(5, 6)] * len(clique_3)
@@ -285,7 +287,7 @@ class TestMpcValidation:
     @pytest.fixture(scope="class")
     def mock_election(self):
         candidates = tuple(string.ascii_uppercase)[:self.copeland_candidates]
-        return Election(None, "Arthur", "a@a.com", ElectionType.copeland, candidates, 1, p, 5)
+        return Election(uuid4(), "Arthur", "a@a.com", ElectionType.copeland, candidates, 1, p, 5)
 
     @pytest_asyncio.fixture
     async def clique(self, mock_election):
@@ -335,7 +337,7 @@ class TestMpcValidation:
         assert response == [expected] * len(clique)
 
     valid_ballots = sorted({tuple(build_ballot(scores)) for scores in product(range(copeland_candidates), repeat=copeland_candidates)})
-    invalid_ballots = sorted(set(product((p-1,0,1), repeat=tallier_size)) - set(valid_ballots))
+    invalid_ballots = sorted(set(product((p-1,0,1), repeat=tallier_size)).difference(valid_ballots))
 
     @pytest.mark.parametrize("ballot", (pytest.param(s, id=f"scores={s}") for s in valid_ballots))
     async def test_validate_copeland_valid(self, clique, ballot):
@@ -362,7 +364,7 @@ class TestMpcValidation:
         shares = transpose(build_ballot_shares(scores=ballot, clique=clique, is_maximin=False))
         expected = tuple(build_ballot(scores=ballot, is_maximin=True))
 
-        async def code(t: MpcValidation, x: tuple[int, ...]) -> bool:
+        async def code(t: MpcValidation, x: tuple[int, ...]) -> tuple[int, ...]:
             return await t.resolve(0, await t.convert_copeland_to_maximin(0, x))
 
         response = await asyncio.gather(*map(code, clique, shares))
