@@ -1,6 +1,6 @@
 import asyncio
 import string
-from itertools import count, product
+from itertools import count, permutations, product
 from random import randint
 from struct import Struct
 from uuid import uuid4
@@ -349,6 +349,26 @@ class TestMpcValidation:
         shares = transpose(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in ballot)
         response = await asyncio.gather(*map(code, clique, shares))
         assert response == [False] * len(clique)
+
+    async def test_validate_borda(self, clique):
+        if self.copeland_candidates != clique[0].message_size(clique[0].election):
+            pytest.skip("Not enough talliers")
+
+        async def code(t: MpcValidation, x: tuple[int, ...]) -> bool:
+            return await t.validate_borda(0, ballot)
+
+        valid_ballots = tuple(permutations(range(self.tallier_size)))
+        invalid_ballots = set(product(range(self.tallier_size), repeat=self.tallier_size)).difference(valid_ballots)
+
+        for ballot in valid_ballots:
+            shares = transpose(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in ballot)
+            response = await asyncio.gather(*map(code, clique, shares))
+            assert response == [True] * len(clique)
+
+        for ballot in invalid_ballots:
+            shares = transpose(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in ballot)
+            response = await asyncio.gather(*map(code, clique, shares))
+            assert response == [False] * len(clique)
 
     valid_ballots = sorted({tuple(build_ballot(scores)) for scores in product(range(copeland_candidates), repeat=copeland_candidates)})
     invalid_ballots = sorted(set(product((p-1,0,1), repeat=tallier_size)).difference(valid_ballots))

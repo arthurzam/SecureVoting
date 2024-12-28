@@ -428,18 +428,21 @@ class MpcValidation(MpcBase):
         return all(x == 0 for x in mul)
 
     async def validate_borda(self, msgbase: int, votes: Tuple[int, ...]):
-        async def check_pair(msgid, pair: Tuple[int, int]) -> bool:
-            rnd = await self.random_number(msgid, amount=len(votes))
-            mul = await self.multiply(msgid, rnd, (pair[0] - pair[1]) % self.p)
-            return 0 != await self.resolve(msgid, mul)
-
-        async def two_stage_permute(msgid: int):
-            return (all(await asyncio.gather(*map(check_pair, count(msgid), combinations(votes, 2)))) or
-                    all(await asyncio.gather(*map(check_pair, count(msgid), combinations(votes, 2)))))
-
         M = len(self.election.candidates)
-        return all(await asyncio.gather(self.validate_range(msgbase, votes, max_value=M - 1),
-                                        two_stage_permute(msgbase + M)))
+
+        if not await self.validate_range(msgbase, votes, max_value=M - 1):
+            return False
+
+        pairs = tuple((m1 - m2) % self.p for m1, m2 in combinations(votes, 2))
+        for i in range(0, len(pairs), M):
+            p = pairs[i:i+M]
+            rnd = await self.random_number(msgbase, amount=len(p))
+            mul = await self.multiply(msgbase, rnd, p)
+            mul = await self.resolve(msgbase, mul)
+            if any(x_i == 0 for x_i in mul):
+                return False
+
+        return True
 
     async def validate_copeland(self, msgbase: int, votes: Tuple[int, ...]):
         M = len(self.election.candidates)
@@ -526,7 +529,7 @@ class MpcValidation(MpcBase):
         if election.selected_election_type == ElectionType.range:
             return M
         if election.selected_election_type == ElectionType.borda:
-            raise NotImplementedError()
+            return M
         if election.selected_election_type == ElectionType.copeland:
             return M * (M - 1) // 2
         if election.selected_election_type == ElectionType.maximin:
