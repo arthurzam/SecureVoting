@@ -336,6 +336,20 @@ class TestMpcValidation:
         response = await asyncio.gather(*map(code, clique, shares))
         assert response == [expected] * len(clique)
 
+    async def test_validate_range(self, clique):
+        async def code(t: MpcValidation, x: tuple[int, ...]) -> bool:
+            return await t.validate_range(0, x, 5)
+
+        ballot = [randint(0, 5) for _ in range(self.tallier_size)]
+        shares = transpose(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in ballot)
+        response = await asyncio.gather(*map(code, clique, shares))
+        assert response == [True] * len(clique)
+
+        ballot = [randint(0, 5) for _ in range(self.tallier_size - 1)] + [6]
+        shares = transpose(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in ballot)
+        response = await asyncio.gather(*map(code, clique, shares))
+        assert response == [False] * len(clique)
+
     valid_ballots = sorted({tuple(build_ballot(scores)) for scores in product(range(copeland_candidates), repeat=copeland_candidates)})
     invalid_ballots = sorted(set(product((p-1,0,1), repeat=tallier_size)).difference(valid_ballots))
 

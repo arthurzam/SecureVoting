@@ -421,12 +421,11 @@ class MpcValidation(MpcBase):
         return s == M - 1 and all((a == 0 for a in a_i))
 
     async def validate_range(self, msgbase: int, votes: tuple[int, ...], max_value: int):
-        async def check_range(msgid: int, vote: int):
-            mul = vote
-            for i in range(max_value):
-                mul = await self.multiply(msgid, mul, (i + 1 - vote) % self.p)
-            return 0 == await self.resolve(msgid, mul)
-        return all(await asyncio.gather(*map(check_range, count(msgbase), votes)))
+        mul = votes
+        for i in range(1, max_value + 1):
+            mul = await self.multiply(msgbase, mul, tuple((v - i) % self.p for v in votes))
+        mul = await self.resolve(msgbase, mul)
+        return all(x == 0 for x in mul)
 
     async def validate_borda(self, msgbase: int, votes: Tuple[int, ...]):
         async def check_pair(msgid, pair: Tuple[int, int]) -> bool:
@@ -525,7 +524,7 @@ class MpcValidation(MpcBase):
         if election.selected_election_type == ElectionType.veto:
             return M + 1
         if election.selected_election_type == ElectionType.range:
-            raise NotImplementedError()
+            return M
         if election.selected_election_type == ElectionType.borda:
             raise NotImplementedError()
         if election.selected_election_type == ElectionType.copeland:
