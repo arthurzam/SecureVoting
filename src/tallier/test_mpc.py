@@ -69,6 +69,7 @@ def generate_clique_talliers(clique_size: int, tallier_size: int):
 async def clique(request):
     talliers = generate_clique_talliers(request.param, tallier_size=1)
     clique_mpc = tuple(MpcWinner(mock_election, t) for t in talliers)
+    await asyncio.gather(*(t.init_randoms(0) for t in clique_mpc))
     yield clique_mpc
     await asyncio.gather(*(t.close() for t in clique_mpc))
 
@@ -77,6 +78,7 @@ async def clique(request):
 async def clique_3():
     talliers = generate_clique_talliers(3, tallier_size=1)
     clique_mpc = tuple(MpcWinner(mock_election, t) for t in talliers)
+    await asyncio.gather(*(t.init_randoms(0) for t in clique_mpc))
     yield clique_mpc
     await asyncio.gather(*(t.close() for t in clique_mpc))
 

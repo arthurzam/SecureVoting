@@ -72,6 +72,22 @@ class MpcWinner(MpcBase):
 
         self.block_size = int(2 * math.ceil(math.sqrt(math.ceil(math.log2(self.p)))) ** 2)
 
+        self.shares_multiply: repeat[tuple[int, int]] = repeat((0, 0))
+        self.shares_random_bits: repeat[tuple[tuple[int, ...], int]] = repeat(((0, ), 0))
+
+    async def init_randoms(self, msgid: int):
+        r_i = randint(0, self.p - 1)
+        d = (self.D + 1) // 2
+        r_i_d = utils.clean_gen_shamir(r_i, self.D, d, self.p) # r_i in D shares
+        r_i_2d = utils.clean_gen_shamir(r_i, self.D, 2 * d - 1, self.p) # r_i in 2D-1 shares
+
+        r_d, r_2d = await asyncio.gather(self.exchange(msgid, r_i_d), self.exchange(msgid + 1, r_i_2d))
+        r_d, r_2d = sum(r_d) % self.p, sum(r_2d) % self.p
+        self.shares_multiply = repeat((r_d, r_2d))
+
+        r_i, r = await self.random_number_bits(msgid, bits_count=math.ceil(math.log2(self.p)))
+        self.shares_random_bits = repeat((r_i, r))
+
     async def exchange(self, msgid: int, values: Tuple[int, ...]) -> Tuple[int, ...]:
         async def single_exchange(tallier: Optional[TallierConn], value: int) -> int:
             if not tallier:
@@ -85,14 +101,7 @@ class MpcWinner(MpcBase):
         return sum(map(operator.mul, self.vandermond_first_row, results)) % self.p
 
     async def rnd_multiply(self, msgid: int, a: int, b: int) -> int:
-        # TODO: pregenerate random shares in D and 2D-1
-        r_i = randint(0, self.p - 1)
-        d = (self.D + 1) // 2
-        r_i_d = utils.clean_gen_shamir(r_i, self.D, d, self.p) # r_i in D shares
-        r_i_2d = utils.clean_gen_shamir(r_i, self.D, 2 * d - 1, self.p) # r_i in 2D-1 shares
-
-        r_d = sum(await self.exchange(msgid, r_i_d)) % self.p
-        r_2d = sum(await self.exchange(msgid, r_i_2d)) % self.p
+        r_d, r_2d = next(self.shares_multiply)
 
         w_d = (a * b + r_2d) % self.p # in 2D-1 shares
 
@@ -195,17 +204,19 @@ class MpcWinner(MpcBase):
         e = sum(e_i) % self.p
         return await self.multiply(msgid, e, (1 - ea) % self.p)
 
-    async def random_number_bits(self, msgid: int, bits_count: int) -> tuple[int, ...]:  # Joint Random Number Bitwise-Sharing
+    async def random_number_bits(self, msgid: int, bits_count: int) -> tuple[tuple[int, ...], int]:  # Joint Random Number Bitwise-Sharing
         while True:
             r_i = await asyncio.gather(*map(self.random_bit, range(msgid, msgid + bits_count)))
             p_i = tuple(int(digit) for digit in reversed(bin(self.p)[2:]))
             check_bit = await self.resolve(msgid, await self.less_bitwise(msgid, r_i, p_i))
             if check_bit == 1:
-                return tuple(r_i)
+                r = sum(bit * 2 ** idx for idx, bit in enumerate(r_i)) % self.p
+                return tuple(r_i), r
 
     async def is_odd(self, msgid: int, x: int) -> int:  # LSB of number
-        r_i = await self.random_number_bits(msgid, bits_count=math.ceil(math.log2(self.p)))
-        r = sum(bit * 2 ** idx for idx, bit in enumerate(r_i)) % self.p
+        # r_i, r = await self.random_number_bits(msgid, bits_count=math.ceil(math.log2(self.p)))
+        r_i, r = next(self.shares_random_bits)
+
         c = await self.resolve(msgid, (x + r) % self.p)
         d = r_i[0] if c % 2 == 0 else (1 - r_i[0]) % self.p
         e = await self.less_bitwise_known(msgid, c, r_i)

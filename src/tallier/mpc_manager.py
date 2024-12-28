@@ -247,6 +247,7 @@ class TallierManager:
             return Tallier(reader, writer)
         talliers = await self.start_clique(election.election_id, wanted_talliers, self_id, tallier_factory)
         mpc = MpcWinner(election, talliers)
+        await mpc.init_randoms(0)
         try:
             match election.selected_election_type:
                 case ElectionType.copeland:
