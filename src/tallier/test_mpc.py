@@ -280,6 +280,7 @@ async def test_maximin_score(clique, ballot, expected):
 class TestMpcValidation:
     copeland_candidates = 4
     tallier_size = copeland_candidates * (copeland_candidates - 1) // 2
+    clique_size = 3
 
     @pytest.fixture(scope="class")
     def mock_election(self):
@@ -288,12 +289,13 @@ class TestMpcValidation:
 
     @pytest_asyncio.fixture
     async def clique(self, mock_election):
-        talliers = generate_clique_talliers(clique_size=3, tallier_size=self.tallier_size)
+        talliers = generate_clique_talliers(clique_size=self.clique_size, tallier_size=self.tallier_size)
         clique_mpc = tuple(MpcValidation(mock_election, t) for t in talliers)
+        await asyncio.gather(*(t.init_randoms(0) for t in clique_mpc))
         yield clique_mpc
         await asyncio.gather(*(t.close() for t in clique_mpc))
 
-    async def test_multiply(self, clique):
+    async def test_bgw_multiply(self, clique):
         a = [randint(0, p - 1) for _ in range(self.tallier_size)]
         b = [randint(0, p - 1) for _ in range(self.tallier_size)]
         expected = tuple((x * y) % p for x, y in zip(a, b))
@@ -302,7 +304,21 @@ class TestMpcValidation:
         shares_b = transpose(clean_gen_shamir(y, len(clique), (len(clique) + 1) // 2, p) for y in b)
 
         async def code(t: MpcValidation, x: tuple[int, ...], y: tuple[int, ...]) -> tuple[int, ...]:
-            return await t.resolve(0, await t.multiply(0, x, y))
+            return await t.resolve(0, await t.bgw_multiply(0, x, y))
+
+        response = await asyncio.gather(*map(code, clique, shares_a, shares_b))
+        assert response == [expected] * len(clique)
+
+    async def test_rnd_multiply(self, clique):
+        a = [randint(0, p - 1) for _ in range(self.tallier_size)]
+        b = [randint(0, p - 1) for _ in range(self.tallier_size)]
+        expected = tuple((x * y) % p for x, y in zip(a, b))
+
+        shares_a = transpose(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in a)
+        shares_b = transpose(clean_gen_shamir(y, len(clique), (len(clique) + 1) // 2, p) for y in b)
+
+        async def code(t: MpcValidation, x: tuple[int, ...], y: tuple[int, ...]) -> tuple[int, ...]:
+            return await t.resolve(0, await t.rnd_multiply(0, x, y))
 
         response = await asyncio.gather(*map(code, clique, shares_a, shares_b))
         assert response == [expected] * len(clique)

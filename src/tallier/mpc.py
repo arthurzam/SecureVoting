@@ -316,6 +316,22 @@ class MpcWinner(MpcBase):
 
 
 class MpcValidation(MpcBase):
+    def __init__(self, election: Election, talliers: Sequence[TallierConn | None]):
+        super().__init__(election, talliers)
+
+        self.shares_multiply: repeat[tuple[int, int]] = repeat((0, 0))
+
+    async def init_randoms(self, msgid: int):
+        r_i = randint(0, self.p - 1)
+        d = (self.D + 1) // 2
+
+        r_i_d = utils.clean_gen_shamir(r_i, self.D, d, self.p) # r_i in D shares
+        r_i_2d = utils.clean_gen_shamir(r_i, self.D, 2 * d - 1, self.p) # r_i in 2D-1 shares
+
+        r_d, r_2d, *_ = await self.exchange(msgid, (r_i_d, r_i_2d, ))
+        r_d, r_2d = sum(r_d) % self.p, sum(r_2d) % self.p
+        self.shares_multiply = repeat((r_d, r_2d))
+
     async def exchange(self, msgid: int, values: tuple[tuple[int, ...], ...]) -> tuple[tuple[int, ...], ...]:
         padding_len = self.message_size(self.election) - len(values)
         assert padding_len >= 0
@@ -326,9 +342,37 @@ class MpcValidation(MpcBase):
             return (await tallier.read(msgid))[:len(values)]
         return utils.transpose(tuple(await asyncio.gather(*map(single_exchange, self.talliers, utils.transpose(values)))))
 
-    async def multiply(self, msgid: int, a_i: tuple[int, ...], b_i: tuple[int, ...]) -> Tuple[int, ...]:
+    async def bgw_multiply(self, msgid: int, a_i: tuple[int, ...], b_i: tuple[int, ...]) -> tuple[int, ...]:
         res_i = await self.exchange(msgid, tuple(self.gen_shamir((a * b) % self.p) for a, b in zip(a_i, b_i)))
         return tuple(sum(map(operator.mul, self.vandermond_first_row, res)) % self.p for res in res_i)
+
+    async def rnd_multiply(self, msgid: int, a_i: tuple[int, ...], b_i: tuple[int, ...]) -> tuple[int, ...]:
+        r_d, r_2d = next(self.shares_multiply)
+
+        w_d_i = tuple((a * b + r_2d) % self.p for a, b in zip(a_i, b_i)) # in 2D-1 shares
+        padding_len = self.message_size(self.election) - len(w_d_i)
+        assert padding_len >= 0
+
+        if T := self.talliers[msgid % len(self.talliers)]: # not selected computing tallier
+            await T.write(msgid, w_d_i + (0,) * padding_len)
+            w_d_i = (await T.read(msgid))[:len(w_d_i)] # public value
+        else: # computing tallier
+            async def get_value(tallier: Optional[TallierConn]) -> tuple[int, ...]:
+                if tallier is None:
+                    return w_d_i
+                return (await tallier.read(msgid))[:len(w_d_i)]
+
+            shares = utils.transpose(tuple(await asyncio.gather(*map(get_value, self.talliers))))
+            w_d_i = tuple(utils.resolve(res, self.p) for res in shares) # public value
+
+            async def send_value(tallier: Optional[TallierConn]):
+                if tallier is not None:
+                    await tallier.write(msgid, w_d_i + (0,) * padding_len)
+            await asyncio.gather(*map(send_value, self.talliers))
+
+        return tuple((w_d - r_d) % self.p for w_d in w_d_i) # in D shares
+
+    multiply = rnd_multiply
 
     async def resolve(self, msgid: int, a_i: Tuple[int, ...]) -> Tuple[int, ...]:
         res_i = await self.exchange(msgid, tuple(tuple(a for _ in range(self.D)) for a in a_i))
@@ -346,7 +390,7 @@ class MpcValidation(MpcBase):
                 result = await self.multiply(msgid, result, a_i)
             result = await self.multiply(msgid, result, result)
             n = n // 2
-        return tuple((self.p + 1 - r) % self.p for r in result) # 1 - result
+        return tuple((1 - r) % self.p for r in result) # 1 - result
 
     async def multi_products(self, msgid: int, Muls: list[tuple[int, ...]]) -> tuple[int, ...]:
         while any(len(Mul) > 1 for Mul in Muls):

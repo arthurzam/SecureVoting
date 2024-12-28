@@ -239,7 +239,9 @@ class TallierManager:
         def tallier_factory(reader, writer):
             return MultiTallier(m, reader, writer)
         talliers = await self.start_clique(election.election_id, wanted_talliers, self_id, tallier_factory)
-        return MpcValidation(election, talliers)
+        mpc = MpcValidation(election, talliers)
+        await mpc.init_randoms(0)
+        return mpc
 
     async def calc_winners(self, election: Election, wanted_talliers: list[TallierAddress], self_id: int, votes_vector: tuple[int, ...]) -> tuple[str, ...]:
         logger.info('Starting winner for %s with %s', election.election_id, votes_vector)
