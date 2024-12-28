@@ -182,6 +182,19 @@ class MpcWinner(MpcBase):
         h_i = await asyncio.gather(*map(self.multiply, count(msgid), e_i, b_i))
         return sum(h_i) % self.p
 
+    async def less_bitwise_known(self, msgid: int, a_pub: int, b_i: Sequence[int]) -> int:  # Bitwise Less-Than, when a is publicly known
+        a_i = tuple(map(int, reversed(str.format(f"{{0:0{len(b_i)}b}}", a_pub))))
+        c_i = tuple(((1 - b) % self.p) if a else b for a, b in zip(a_i, b_i))[::-1]
+
+        d_i = (c_i[0], )
+        for c in c_i[1:]:
+            d_i = ((d_i[0] + c - await self.multiply(msgid, d_i[0], c)) % self.p, ) + d_i
+
+        e_i = [(d_i[i] - d_i[i + 1]) for i in range(len(a_i) - 1)] + [d_i[-1]]
+        ea = sum((e * a) for e, a in zip(e_i, a_i))
+        e = sum(e_i) % self.p
+        return await self.multiply(msgid, e, (1 - ea) % self.p)
+
     async def random_number_bits(self, msgid: int, bits_count: int) -> tuple[int, ...]:  # Joint Random Number Bitwise-Sharing
         while True:
             r_i = await asyncio.gather(*map(self.random_bit, range(msgid, msgid + bits_count)))
@@ -195,9 +208,7 @@ class MpcWinner(MpcBase):
         r = sum(bit * 2 ** idx for idx, bit in enumerate(r_i)) % self.p
         c = await self.resolve(msgid, (x + r) % self.p)
         d = r_i[0] if c % 2 == 0 else (1 - r_i[0]) % self.p
-        c_i = [int(digit) for digit in reversed(bin(c)[2:])]
-        c_i += [0] * (len(r_i) - len(c_i))
-        e = await self.less_bitwise(msgid, c_i, r_i)
+        e = await self.less_bitwise_known(msgid, c, r_i)
         return (e + d - 2 * await self.multiply(msgid, e, d)) % self.p
 
     async def less_middle(self, msgid: int, a: int) -> int:  # Is less than half p

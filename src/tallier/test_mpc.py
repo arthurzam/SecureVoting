@@ -133,6 +133,42 @@ async def test_random_number(clique):
     response = await asyncio.gather(*map(code, clique))
     assert response[0] == response[1] == response[2]
 
+
+@pytest.mark.asyncio
+async def test_less_bitwise(clique):
+    a = randint(0, p - 1)
+    b = randint(0, p - 1)
+    expected = int(a < b)
+
+    a_i = tuple(map(int, reversed(str.format(f"{{0:032b}}", a))))
+    shares_a_i = tuple(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in a_i)
+
+    b_i = tuple(map(int, reversed(str.format(f"{{0:032b}}", b))))
+    shares_b_i = tuple(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in b_i)
+
+    async def code(t: MpcWinner, *shares: int) -> int:
+        a_i, b_i = shares[:32], shares[32:]
+        return await t.resolve(0, await t.less_bitwise(0, a_i, b_i))
+
+    response = await asyncio.gather(*map(code, clique, *(shares_a_i + shares_b_i)))
+    assert response == [expected] * len(clique), f"a={a}, b={b}"
+
+
+@pytest.mark.asyncio
+async def test_less_bitwise_known(clique):
+    a = randint(0, p - 1)
+    b = randint(0, p - 1)
+    expected = int(a < b)
+
+    b_i = tuple(map(int, reversed(str.format(f"{{0:032b}}", b))))
+    shares_b_i = tuple(clean_gen_shamir(x, len(clique), (len(clique) + 1) // 2, p) for x in b_i)
+
+    async def code(t: MpcWinner, *b_i: int) -> int:
+        return await t.resolve(0, await t.less_bitwise_known(0, a, b_i))
+
+    response = await asyncio.gather(*map(code, clique, *shares_b_i))
+    assert response == [expected] * len(clique), f"a={a}, b={b}"
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("a", (0, 1, 2, 3, 4))
 async def test_is_zero(clique, a):
@@ -144,6 +180,22 @@ async def test_is_zero(clique, a):
 
     response = await asyncio.gather(*map(code, clique, shares))
     assert response == [expected] * len(clique)
+
+
+@pytest.mark.asyncio
+async def test_less(clique):
+    a = randint(0, p - 1)
+    b = randint(0, p - 1)
+    expected = int(a < b)
+
+    shares_a = clean_gen_shamir(a, len(clique), (len(clique) + 1) // 2, p)
+    shares_b = clean_gen_shamir(b, len(clique), (len(clique) + 1) // 2, p)
+
+    async def code(t: MpcWinner, a: int, b: int) -> int:
+        return await t.resolve(0, await t.less(0, a, b))
+
+    response = await asyncio.gather(*map(code, clique, shares_a, shares_b))
+    assert response == [expected] * len(clique), f"a={a}, b={b}"
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("a", (-2, -1, 0, 1, 2, 3, p//2, -(p//2)))
