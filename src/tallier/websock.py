@@ -5,6 +5,7 @@ import os
 from uuid import UUID
 
 import websockets as ws
+from websockets.asyncio.server import ServerConnection
 
 from db import DBconn
 from mpc_manager import TallierManager, Tallier
@@ -36,7 +37,9 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
     logger = logging.getLogger('websocket')
     logger.setLevel(logging.INFO)
 
-    async def handler(websocket, path: str):
+    async def handler(websocket: ServerConnection):
+        assert websocket.request, "No request"
+        path = websocket.request.path
         try:
             message = json.loads(await websocket.recv())
             if path == "/register":
@@ -166,4 +169,4 @@ def websock_server(db: DBconn, manager: TallierManager, tallier_id: int, wanted_
             logger.error('Error handling on %s', path, exc_info=e)
             return await websocket.close(code=1003)
 
-    return ws.serve(handler, "", 8080)
+    return ws.serve(handler, "", port=8080)
