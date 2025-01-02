@@ -17,7 +17,7 @@ def build_msg(to: str, title: str, content: str) -> EmailMessage:
 
 def register_email(to: str, name: str, secret_number: int):
     content = f"{name} , welcome to aVote system.\n" \
-        f"Your login code is: {secret_number}\n" \
+        f"Your login password is: {secret_number}\n" \
         "Please don't forget it!\n" \
         f"To login, enter the URL: {WEBSITE_URL}/login\n"
     with SMTP('mailserver') as s:
