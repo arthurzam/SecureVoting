@@ -20,8 +20,8 @@ _generate_ssl_conf() {
         L                  = Santa Barbara
         O                  = Secure Voting
         OU                 = For Testing Purposes Only
-        CN                 = localhost ${1:-CA} 
-        emailAddress       = ${1:-CA}@vmware
+        CN                 = localhost ${1:-CA}
+        emailAddress       = ${1:-CA}@avote
         [ ca ]
         basicConstraints     = critical, CA:TRUE, pathlen:1
         keyUsage             = critical, nonRepudiation, cRLSign, keyCertSign
