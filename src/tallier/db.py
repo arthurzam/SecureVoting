@@ -46,19 +46,18 @@ class DBconn:
     async def get_elections_ids(self, email: str) -> tuple[dict, ...]:
         async with self.conn.transaction():
             elections = await self.conn.fetch("""
-                WITH election_stats AS (
-                    SELECT election_id, COUNT(email) AS voters,
-                        COUNT(email) FILTER(WHERE vote_state != 2147483648) AS voted,
-                        (1 = COUNT(email) FILTER(WHERE email = $1)) AS can_vote
-                    FROM election_votes
-                    GROUP BY election_id
-                )
-                SELECT name, election_stats.*, (manager_email = $1) AS is_manager,
-                    (running_election.vote_vector IS NOT NULL) AS is_running,
-                    (finished_election.winners IS NOT NULL) AS is_finished
-                FROM elections JOIN election_stats USING (election_id)
+                SELECT name, election_id,
+                    COUNT(email) AS voters,
+                    COUNT(email) FILTER(WHERE vote_state != 2147483648) AS voted,
+                    bool_or(email = $1) AS can_vote,
+                    (manager_email = $1) AS is_manager,
+                    bool_or(running_election.vote_vector IS NOT NULL) AS is_running,
+                    bool_or(finished_election.winners IS NOT NULL) AS is_finished
+                FROM elections JOIN election_votes USING (election_id)
                 LEFT JOIN running_election USING (election_id)
                 LEFT JOIN finished_election USING (election_id)
+                GROUP BY election_id
+                HAVING manager_email = $1 OR bool_or(email = $1)
             """, email)
 
             def output(record):
