@@ -29,7 +29,9 @@ class DBconn:
         try:
             async with self.conn.transaction():
                 await self.conn.execute("""
-                    INSERT INTO users(email, name, secret_number) VALUES ($1, $2, $3)
+                    INSERT INTO users(email, name, secret_number)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT DO UPDATE SET name = $2, secret_number = $3
                 """, email, name, secret_number)
                 return True
         except asyncpg.UniqueViolationError:
