@@ -1,0 +1,19 @@
+[Unit]
+Description=SecureVoting webserver
+
+[Container]
+ContainerName=securevoting-webserver
+Image=ghcr.io/arthurzam/securevoting:webserver-latest
+AutoUpdate=registry
+#StopSignal=SIGINT
+
+EnvironmentFile=/etc/default/securevoting
+
+PublishPort=127.0.0.1:34580:5000
+Network=securevoting.network
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=securevoting.target

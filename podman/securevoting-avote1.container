@@ -1,0 +1,28 @@
+[Unit]
+Description=SecureVoting tallier 1
+After=postgresql.service
+Requires=postgresql.service
+
+[Container]
+ContainerName=securevoting-avote1
+Image=ghcr.io/arthurzam/securevoting:tallier-latest
+Exec=1
+AutoUpdate=registry
+
+#StopSignal=SIGINT
+PodmanArgs=--network-alias avote1 --add-host=db:host-gateway
+
+EnvironmentFile=/etc/default/securevoting
+
+Secret=securevoting-gmail-user,type=env,target=GMAIL_USER
+Secret=securevoting-avote_ca.crt,type=mount,target=/run/secrets/avote_ca.crt
+Secret=securevoting-avote1_key.pem,type=mount,target=/run/secrets/certfile.pem
+
+PublishPort=127.0.0.1:34581:8080
+Network=securevoting.network
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=securevoting.target

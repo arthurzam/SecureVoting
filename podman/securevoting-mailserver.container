@@ -1,0 +1,20 @@
+[Unit]
+Description=SecureVoting mail server
+
+[Container]
+ContainerName=securevoting-mailserver
+Image=registry.gitlab.com/egos-tech/smtp:latest
+AutoUpdate=registry
+
+PodmanArgs=--network-alias mailserver
+
+Secret=securevoting-gmail-user,type=env,target=GMAIL_USER
+Secret=securevoting-gmail-pass,type=env,target=GMAIL_PASSWORD
+
+Network=securevoting.network
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=securevoting.target
