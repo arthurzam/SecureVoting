@@ -8,8 +8,10 @@ AutoUpdate=registry
 
 PodmanArgs=--network-alias mailserver
 
-Secret=securevoting-gmail-user,type=env,target=GMAIL_USER
-Secret=securevoting-gmail-pass,type=env,target=GMAIL_PASSWORD
+Secret=securevoting-smtp-address,type=env,target=SMARTHOST_ADDRESS
+Secret=securevoting-smtp-port,type=env,target=SMARTHOST_PORT
+Secret=securevoting-smtp-user,type=env,target=SMARTHOST_USER
+Secret=securevoting-smtp-password,type=env,target=SMARTHOST_PASSWORD
 
 Network=securevoting.network
 

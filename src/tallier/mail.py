@@ -6,12 +6,12 @@ from typing import Iterable
 import mytypes
 
 WEBSITE_URL = os.getenv("WEBSITE_URL", "http://localhost")
-EMAIL = os.getenv("GMAIL_USER", "avote")
+EMAIL = os.getenv("EMAIL_ADDRESS")
 
 def build_msg(to: str, title: str, content: str) -> EmailMessage:
     msg = EmailMessage()
     msg['Subject'] = title
-    msg['From'] = f'aVote <{EMAIL}@gmail.com>'
+    msg['From'] = f'aVote <{EMAIL}>'
     msg['To'] = to
     msg.set_content(content)
     return msg

@@ -16,7 +16,7 @@ from mytypes import Election, ElectionType
 running_elections: dict[UUID, MpcValidation] = {}
 computation_mpc: MpcWinner | None = None
 
-enable_mail = os.getenv("MAIL_DISABLED") != "1"
+enable_mail = os.getenv("MAIL_DISABLED") != "1" and os.getenv("EMAIL_ADDRESS") is not None
 
 def get_user_id(email: str):
     from hashlib import sha1

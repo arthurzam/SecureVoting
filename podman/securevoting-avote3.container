@@ -14,7 +14,7 @@ PodmanArgs=--network-alias avote3 --add-host=db:host-gateway
 
 EnvironmentFile=/etc/default/securevoting
 
-Secret=securevoting-gmail-user,type=env,target=GMAIL_USER
+Secret=securevoting-smtp-sender,type=env,target=EMAIL_ADDRESS
 Secret=securevoting-avote_ca.crt,type=mount,target=/run/secrets/avote_ca.crt
 Secret=securevoting-avote3_key.pem,type=mount,target=/run/secrets/certfile.pem
 

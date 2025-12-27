@@ -48,6 +48,7 @@ MAIL_DISABLED=1
 
 GMAIL_USER="<username>"
 GMAIL_PASSWORD="<password>"
+EMAIL_ADDRESS="${GMAIL_USER}@gmail.com"
 ```
 
 ## Running the demo

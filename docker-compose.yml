@@ -29,7 +29,7 @@ services:
       TALLIERS_INTERNAL: "${TALLIERS_INTERNAL}"
       WEBSITE_URL: "${WEBSITE_URL}"
       MAIL_DISABLED: "${MAIL_DISABLED}"
-      GMAIL_USER: "${GMAIL_USER}"
+      EMAIL_ADDRESS: "${EMAIL_ADDRESS}"
     ports:
       - "18080:18080"
       - "8080:8080"
@@ -51,7 +51,7 @@ services:
       TALLIERS_INTERNAL: "${TALLIERS_INTERNAL}"
       WEBSITE_URL: "${WEBSITE_URL}"
       MAIL_DISABLED: "${MAIL_DISABLED}"
-      GMAIL_USER: "${GMAIL_USER}"
+      EMAIL_ADDRESS: "${EMAIL_ADDRESS}"
     ports:
       - "18081:18080"
       - "8081:8080"
@@ -67,7 +67,7 @@ services:
       TALLIERS_INTERNAL: "${TALLIERS_INTERNAL}"
       WEBSITE_URL: "${WEBSITE_URL}"
       MAIL_DISABLED: "${MAIL_DISABLED}"
-      GMAIL_USER: "${GMAIL_USER}"
+      EMAIL_ADDRESS: "${EMAIL_ADDRESS}"
     secrets:
       - avote_ca.crt
       - source: avote3_key.pem
